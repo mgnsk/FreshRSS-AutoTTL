@@ -1,6 +1,6 @@
 # FreshRSS-AutoTTL extension
 
-A FreshRSS extension for automatic feed refresh TTL based on the average frequency of posts.
+A FreshRSS extension for automatic feed refresh TTL based on the average frequency of entries.
 
 # Configuration
 
