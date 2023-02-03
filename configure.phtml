@@ -1,7 +1,7 @@
 <form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
 	<input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
 	<div class="form-group">
-		<label class="group-name" for="auto_ttl_max_ttl">Force refresh at least once per</label>
+		<label class="group-name" for="auto_ttl_max_ttl">Max TTL</label>
 		<div class="group-controls">
 			<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" required="required">
 				<?php foreach (
