@@ -1,7 +1,7 @@
 {
   "name": "AutoTTL",
   "author": "Magnus Kokk",
-  "description": "A FreshRSS extension for automatic feed refresh TTL based on the average frequency of posts.",
+  "description": "A FreshRSS extension for automatic feed refresh TTL based on the average frequency of entries.",
   "version": 0.1,
   "entrypoint": "AutoTTL",
   "type": "user"
