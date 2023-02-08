@@ -5,6 +5,10 @@ class AutoTTLExtension extends Minz_Extension
     // Defaults
     private const MAX_TTL = 24 * 60 * 60; // 1 day
 
+
+    /**
+     * @var FreshRSS_StatsDAO
+     */
     private $statsDAO = null;
 
     public function init()
