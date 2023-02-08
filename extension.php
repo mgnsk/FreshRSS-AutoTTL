@@ -5,8 +5,11 @@ class AutoTTLExtension extends Minz_Extension
     // Defaults
     private const MAX_TTL = 24 * 60 * 60; // 1 day
 
+    private $statsDAO = null;
+
     public function init()
     {
+        $this->statsDAO = FreshRSS_Factory::createStatsDAO();
         $this->registerHook('feed_before_actualize', array($this, 'feedBeforeActualizeHook'));
 
         if (is_null(FreshRSS_Context::$user_conf->auto_ttl_max_ttl)) {
@@ -25,36 +28,36 @@ class AutoTTLExtension extends Minz_Extension
         }
     }
 
-    public static function feedBeforeActualizeHook(FreshRSS_Feed $feed)
+    public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
         $maxTTL = (int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
 
-        $ttl = self::getAvgTTL($feed);
+        $ttl = $this->getAvgTTL($feed);
         if ($ttl > $maxTTL) {
             $ttl = $maxTTL;
         }
 
-        if (time() - $feed->lastUpdate() < $ttl) {
-            // TTL has not been exceeded yet, skip feed.
-            Minz_Log::debug(sprintf(
-                'AutoTTL: skipping feed %d (%s), TTL: %ds, last update at %s, next update at %s',
-                $feed->id(),
-                $feed->name(),
-                $ttl,
-                date('Y-m-d H:i:s', $feed->lastUpdate()),
-                date('Y-m-d H:i:s', $feed->lastUpdate() + $ttl),
-            ));
+        $now = time();
 
-            return null;
+        if ($ttl === 0 || $feed->lastUpdate() === 0 || $now - $feed->lastUpdate() > $ttl) {
+            return $feed;
         }
 
-        return $feed;
+        Minz_Log::debug(sprintf(
+            'AutoTTL: skipping feed %d (%s), TTL: %ds, last update at %s, next update at %s',
+            $feed->id(),
+            $feed->name(),
+            $ttl,
+            date('Y-m-d H:i:s', $feed->lastUpdate()),
+            date('Y-m-d H:i:s', $feed->lastUpdate() + $ttl),
+        ));
+
+        return null;
     }
 
-    public static function getAvgTTL(FreshRSS_Feed $feed): int
+    private function getAvgTTL(FreshRSS_Feed $feed): int
     {
-        $statsDAO = FreshRSS_Factory::createStatsDAO();
-        $perHour = $statsDAO->calculateEntryAveragePerFeedPerHour($feed->id());
+        $perHour = $this->statsDAO->calculateEntryAveragePerFeedPerHour($feed->id());
 
         if ($perHour > 0) {
             // Average seconds between feed entries.
