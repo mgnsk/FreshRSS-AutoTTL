@@ -34,14 +34,29 @@ class AutoTTLExtension extends Minz_Extension
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
+        $now = time();
+        
         $maxTTL = (int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
+        
+        if ($this->countEntries($feed) < 2){
+            Minz_Log::debug(sprintf(
+                'AutoTTL: %d entries in feed %d (%s), unable to calculate avg TTL ,fallbacking to max TTL',
+                $this->countEntries($feed),
+                $feed->id(),
+                $feed->name(),
+            ));
+            
+            if ($now - $feed->lastUpdate() < $maxTTL) {
+                return null;
+            } else {
+                return $feed;
+            }
+        }
 
         $ttl = $this->getAvgTTL($feed);
         if ($ttl > $maxTTL) {
             $ttl = $maxTTL;
         }
-
-        $now = time();
 
         if ($ttl === 0 || $feed->lastUpdate() === 0 || $now - $feed->lastUpdate() > $ttl) {
             return $feed;
@@ -69,5 +84,11 @@ class AutoTTLExtension extends Minz_Extension
         }
 
         return 0;
+    }
+
+    private function countEntries(FreshRSS_Feed $feed): int
+    {
+        $feedDAO = FreshRSS_Factory::createFeedDao();
+        return (int)$feedEntries = $feedDAO->countEntries($feed->id());
     }
 }
