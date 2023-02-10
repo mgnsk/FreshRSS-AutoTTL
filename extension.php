@@ -53,12 +53,7 @@ class AutoTTLExtension extends Minz_Extension
                 return $feed;
             }
 
-            Minz_Log::debug(sprintf(
-                'AutoTTL: skip feed %d (%s), %d entries, unable to calculate avg TTL, falling back to max TTL',
-                $feed->id(),
-                $feed->name(),
-                $count,
-            ));
+            $this->logSkipTTL($feed, $count, $maxTTL);
 
             return null;
         }
@@ -74,15 +69,21 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
+        $this->logSkipTTL($feed, $count, $ttl);
+
+        return null;
+    }
+
+    private function logSkipTTL(FreshRSS_Feed $feed, int $count, int $ttl)
+    {
         Minz_Log::debug(sprintf(
-            'AutoTTL: skip feed %d (%s), TTL: %ds, last update at %s, next update at %s',
+            'AutoTTL: skip feed %d (%s), count: %d, TTL: %ds, last update at %s, next update at %s',
             $feed->id(),
             $feed->name(),
+            $count,
             $ttl,
             date('Y-m-d H:i:s', $feed->lastUpdate()),
             date('Y-m-d H:i:s', $feed->lastUpdate() + $ttl),
         ));
-
-        return null;
     }
 }
