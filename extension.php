@@ -11,9 +11,15 @@ class AutoTTLExtension extends Minz_Extension
      */
     private $statsDAO = null;
 
+    /**
+     * @var FreshRSS_FeedDAO
+     */
+    private $feedDAO = null;
+
     public function init()
     {
         $this->statsDAO = FreshRSS_Factory::createStatsDAO();
+        $this->feedDAO = FreshRSS_Factory::createFeedDao();
         $this->registerHook('feed_before_actualize', array($this, 'feedBeforeActualizeHook'));
 
         if (is_null(FreshRSS_Context::$user_conf->auto_ttl_max_ttl)) {
@@ -34,23 +40,27 @@ class AutoTTLExtension extends Minz_Extension
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
+        if ($feed->lastUpdate() === 0) {
+            return $feed;
+        }
+
         $now = time();
-        
         $maxTTL = (int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
-        
-        if ($this->countEntries($feed) < 2){
+        $count = $this->feedDAO->countEntries($feed->id());
+
+        if ($count < 2) {
             Minz_Log::debug(sprintf(
-                'AutoTTL: %d entries in feed %d (%s), unable to calculate avg TTL ,fallbacking to max TTL',
-                $this->countEntries($feed),
+                'AutoTTL: %d entries in feed %d (%s), unable to calculate avg TTL, falling back to max TTL',
+                $count,
                 $feed->id(),
                 $feed->name(),
             ));
-            
-            if ($now - $feed->lastUpdate() < $maxTTL) {
-                return null;
-            } else {
+
+            if ($now - $feed->lastUpdate() > $maxTTL) {
                 return $feed;
             }
+
+            return null;
         }
 
         $ttl = $this->getAvgTTL($feed);
@@ -58,7 +68,7 @@ class AutoTTLExtension extends Minz_Extension
             $ttl = $maxTTL;
         }
 
-        if ($ttl === 0 || $feed->lastUpdate() === 0 || $now - $feed->lastUpdate() > $ttl) {
+        if ($ttl === 0 || $now - $feed->lastUpdate() > $ttl) {
             return $feed;
         }
 
@@ -84,11 +94,5 @@ class AutoTTLExtension extends Minz_Extension
         }
 
         return 0;
-    }
-
-    private function countEntries(FreshRSS_Feed $feed): int
-    {
-        $feedDAO = FreshRSS_Factory::createFeedDao();
-        return (int)$feedEntries = $feedDAO->countEntries($feed->id());
     }
 }
