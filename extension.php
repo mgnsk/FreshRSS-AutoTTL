@@ -49,21 +49,23 @@ class AutoTTLExtension extends Minz_Extension
         $count = $this->feedDAO->countEntries($feed->id());
 
         if ($count < 2) {
-            Minz_Log::debug(sprintf(
-                'AutoTTL: %d entries in feed %d (%s), unable to calculate avg TTL, falling back to max TTL',
-                $count,
-                $feed->id(),
-                $feed->name(),
-            ));
-
             if ($now - $feed->lastUpdate() > $maxTTL) {
                 return $feed;
             }
 
+            Minz_Log::debug(sprintf(
+                'AutoTTL: skip feed %d (%s), %d entries, unable to calculate avg TTL, falling back to max TTL',
+                $feed->id(),
+                $feed->name(),
+                $count,
+            ));
+
             return null;
         }
 
-        $ttl = $this->getAvgTTL($feed);
+        // Calculate average seconds between feed entries.
+        $perHour = $this->statsDAO->calculateEntryAveragePerFeedPerHour($feed->id());
+        $ttl = (int)((1 / $perHour) * 60 * 60);
         if ($ttl > $maxTTL) {
             $ttl = $maxTTL;
         }
@@ -73,7 +75,7 @@ class AutoTTLExtension extends Minz_Extension
         }
 
         Minz_Log::debug(sprintf(
-            'AutoTTL: skipping feed %d (%s), TTL: %ds, last update at %s, next update at %s',
+            'AutoTTL: skip feed %d (%s), TTL: %ds, last update at %s, next update at %s',
             $feed->id(),
             $feed->name(),
             $ttl,
@@ -82,17 +84,5 @@ class AutoTTLExtension extends Minz_Extension
         ));
 
         return null;
-    }
-
-    private function getAvgTTL(FreshRSS_Feed $feed): int
-    {
-        $perHour = $this->statsDAO->calculateEntryAveragePerFeedPerHour($feed->id());
-
-        if ($perHour > 0) {
-            // Average seconds between feed entries.
-            return (int)((1 / $perHour) * 60 * 60);
-        }
-
-        return 0;
     }
 }
