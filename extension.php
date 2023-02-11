@@ -5,7 +5,6 @@ class AutoTTLExtension extends Minz_Extension
     // Defaults
     private const MAX_TTL = 24 * 60 * 60; // 1 day
 
-
     /**
      * @var FreshRSS_StatsDAO
      */
@@ -53,33 +52,46 @@ class AutoTTLExtension extends Minz_Extension
                 return $feed;
             }
 
-            $this->logSkipTTL($feed, $count, $maxTTL);
+            $this->debug("unable to calculate avg, falling back to maxTTL", $feed, $count, $maxTTL);
 
             return null;
         }
 
         // Calculate average seconds between feed entries.
         $perHour = $this->statsDAO->calculateEntryAveragePerFeedPerHour($feed->id());
+
+        if ((int)$perHour === (int)$count) {
+            // All entries have the same date. May happen with XPath scraping when date selector is not specified.
+            if ($now - $feed->lastUpdate() > $maxTTL) {
+                return $feed;
+            }
+
+            $this->debug("all entries have the same date, falling back to maxTTL", $feed, $count, $maxTTL);
+
+            return null;
+        }
+
         $ttl = (int)((1 / $perHour) * 60 * 60);
         if ($ttl > $maxTTL) {
             $ttl = $maxTTL;
         }
 
-        if ($ttl === 0 || $now - $feed->lastUpdate() > $ttl) {
+        if ($now - $feed->lastUpdate() > $ttl) {
             return $feed;
         }
 
-        $this->logSkipTTL($feed, $count, $ttl);
+        $this->debug("avg TTL not exceeded yet", $feed, $count, $ttl);
 
         return null;
     }
 
-    private function logSkipTTL(FreshRSS_Feed $feed, int $count, int $ttl)
+    private function debug(string $msg, FreshRSS_Feed $feed, int $count, int $ttl)
     {
         Minz_Log::debug(sprintf(
-            'AutoTTL: skip feed %d (%s), count: %d, TTL: %ds, last update at %s, next update at %s',
+            'AutoTTL: skip feed %d (%s), %s, count: %d, TTL: %ds, last update at %s, next update at %s',
             $feed->id(),
             $feed->name(),
+            $msg,
             $count,
             $ttl,
             date('Y-m-d H:i:s', $feed->lastUpdate()),
