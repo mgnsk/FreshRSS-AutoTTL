@@ -19,8 +19,9 @@ SQL;
         $res = $stm->fetch(PDO::FETCH_NAMED);
 
         if ($res['count'] > 0) {
-            $interval_in_seconds = (int)$res['date_max'] - (int)$res['date_min'];
-            return (int)($interval_in_seconds / (int)$res['count']);
+            $interval_in_seconds =
+                (int) $res['date_max'] - (int) $res['date_min'];
+            return (int) ($interval_in_seconds / (int) $res['count']);
         }
 
         return 0;

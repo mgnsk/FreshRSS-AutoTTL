@@ -1,6 +1,6 @@
 <?php
 
-require_once(__DIR__ . "/stats.php");
+require_once __DIR__ . "/stats.php";
 
 class AutoTTLExtension extends Minz_Extension
 {
@@ -15,7 +15,10 @@ class AutoTTLExtension extends Minz_Extension
     public function init()
     {
         $this->stats = new AutoTTLStats();
-        $this->registerHook('feed_before_actualize', array($this, 'feedBeforeActualizeHook'));
+        $this->registerHook('feed_before_actualize', [
+            $this,
+            'feedBeforeActualizeHook',
+        ]);
 
         if (is_null(FreshRSS_Context::$user_conf->auto_ttl_max_ttl)) {
             FreshRSS_Context::$user_conf->auto_ttl_max_ttl = self::MAX_TTL;
@@ -28,7 +31,10 @@ class AutoTTLExtension extends Minz_Extension
         $this->registerTranslates();
 
         if (Minz_Request::isPost()) {
-            FreshRSS_Context::$user_conf->auto_ttl_max_ttl = (int)Minz_Request::param('auto_ttl_max_ttl', self::MAX_TTL);
+            FreshRSS_Context::$user_conf->auto_ttl_max_ttl = (int) Minz_Request::param(
+                'auto_ttl_max_ttl',
+                self::MAX_TTL
+            );
             FreshRSS_Context::$user_conf->save();
         }
     }
@@ -41,7 +47,7 @@ class AutoTTLExtension extends Minz_Extension
 
         $now = time();
         $minTTL = $this->getMinTTL($feed);
-        $maxTTL = (int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
+        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
         $d = $now - $feed->lastUpdate();
 
         if ($d >= $maxTTL) {
@@ -51,19 +57,32 @@ class AutoTTLExtension extends Minz_Extension
         $avgTTL = $this->stats->calcAvgTTL($feed->id());
 
         if ($avgTTL === 0) {
-            $this->debug($feed, sprintf('unable to calculate avg TTL, falling back to max TTL (%ds)', $maxTTL));
+            $this->debug(
+                $feed,
+                sprintf(
+                    'unable to calculate avg TTL, falling back to max TTL (%ds)',
+                    $maxTTL
+                )
+            );
             return null;
         }
 
         $ttl = $avgTTL;
         if ($ttl > $maxTTL) {
             $ttl = $maxTTL;
-        } elseif ($ttl< $minTTL) {
+        } elseif ($ttl < $minTTL) {
             $ttl = $minTTL;
         }
 
         if ($d < $ttl) {
-            $this->debug($feed, sprintf('adjusted TTL (%ds) not exceeded yet (avg %ds)', $ttl, $avgTTL));
+            $this->debug(
+                $feed,
+                sprintf(
+                    'adjusted TTL (%ds) not exceeded yet (avg %ds)',
+                    $ttl,
+                    $avgTTL
+                )
+            );
             return null;
         }
 
@@ -73,16 +92,20 @@ class AutoTTLExtension extends Minz_Extension
     private function getMinTTL(FreshRSS_Feed $feed): int
     {
         $ttl = $feed->ttl();
-        return $ttl == FreshRSS_Feed::TTL_DEFAULT ? FreshRSS_Context::$user_conf->ttl_default : $ttl;
+        return $ttl == FreshRSS_Feed::TTL_DEFAULT
+            ? FreshRSS_Context::$user_conf->ttl_default
+            : $ttl;
     }
 
     private function debug(FreshRSS_Feed $feed, string $msg)
     {
-        Minz_Log::debug(sprintf(
-            'AutoTTL: skip feed %d (%s): %s',
-            $feed->id(),
-            $feed->name(),
-            $msg,
-        ));
+        Minz_Log::debug(
+            sprintf(
+                'AutoTTL: skip feed %d (%s): %s',
+                $feed->id(),
+                $feed->name(),
+                $msg
+            )
+        );
     }
 }
