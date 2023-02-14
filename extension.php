@@ -44,24 +44,26 @@ class AutoTTLExtension extends Minz_Extension
         $maxTTL = (int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
         $d = $now - $feed->lastUpdate();
 
-        if ($d > $maxTTL) {
+        if ($d >= $maxTTL) {
             return $feed;
         }
 
         $avgTTL = $this->stats->calcAvgTTL($feed->id());
 
         if ($avgTTL === 0) {
-            $this->debug($feed, sprintf('unable to calculate avgTTL, falling back to maxTTL (%ds)', $maxTTL));
+            $this->debug($feed, sprintf('unable to calculate avg TTL, falling back to max TTL (%ds)', $maxTTL));
             return null;
         }
 
-        if ($d < $minTTL) {
-            $this->debug($feed, sprintf('minTTL (%ds) not exceeded yet', $minTTL));
-            return null;
+        $ttl = $avgTTL;
+        if ($ttl > $maxTTL) {
+            $ttl = $maxTTL;
+        } elseif ($ttl< $minTTL) {
+            $ttl = $minTTL;
         }
 
-        if ($d < $avgTTL) {
-            $this->debug($feed, sprintf('avgTTL (%ds) not exceeded yet', $avgTTL));
+        if ($d < $ttl) {
+            $this->debug($feed, sprintf('adjusted TTL (%ds) not exceeded yet (avg %ds)', $ttl, $avgTTL));
             return null;
         }
 
