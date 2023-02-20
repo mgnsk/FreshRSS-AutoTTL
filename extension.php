@@ -48,19 +48,33 @@ class AutoTTLExtension extends Minz_Extension
         $now = time();
         $minTTL = $this->getMinTTL($feed);
         $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
-        $d = $now - $feed->lastUpdate();
+        $timeSinceLastUpdate = $now - $feed->lastUpdate();
 
-        if ($d >= $maxTTL) {
+        if ($timeSinceLastUpdate >= $maxTTL) {
             return $feed;
         }
 
-        $avgTTL = $this->stats->calcAvgTTL($feed->id());
+        $statResult = $this->stats->fetchStats($feed->id());
+        $avgTTL = $statResult->getAvgTTL();
 
         if ($avgTTL === 0) {
             $this->debug(
                 $feed,
                 sprintf(
                     'unable to calculate avg TTL, falling back to max TTL (%ds)',
+                    $maxTTL
+                )
+            );
+            return null;
+        }
+
+        $timeSinceLastEntry = $now - $statResult->getMaxDate();
+        if ($timeSinceLastEntry > 2 * $maxTTL) {
+            $this->debug(
+                $feed,
+                sprintf(
+                    'idle feed: last entry (%s) more than 2x max TTL ago, falling back to max TTL (%ds)',
+                    date('r', $statResult->getMaxDate()),
                     $maxTTL
                 )
             );
@@ -74,7 +88,7 @@ class AutoTTLExtension extends Minz_Extension
             $ttl = $minTTL;
         }
 
-        if ($d < $ttl) {
+        if ($timeSinceLastUpdate < $ttl) {
             $this->debug(
                 $feed,
                 sprintf(
@@ -101,9 +115,10 @@ class AutoTTLExtension extends Minz_Extension
     {
         Minz_Log::debug(
             sprintf(
-                'AutoTTL: skip feed %d (%s): %s',
+                'AutoTTL: skip feed %d (%s, last update %s): %s',
                 $feed->id(),
                 $feed->name(),
+                date('r', $feed->lastUpdate()),
                 $msg
             )
         );
