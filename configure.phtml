@@ -54,3 +54,29 @@
 		</div>
 	</div>
 </form>
+
+<div class="table-wrapper">
+	<h2>Feed frequency statistics</h2>
+	<table>
+		<thead>
+			<th>Feed</th>
+			<th>Average TTL</th>
+			<th>Adjusted TTL</th>
+		</thead>
+		<tbody>
+		<?php foreach ($this->getStats()->fetchAllStats() as $feed) { ?>
+		<tr>
+			<td>
+				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
+			</td>
+			<td>
+				<?= $feed['avg_ttl'] ?>s
+			</td>
+			<td>
+				<?= $feed['adjusted_ttl'] ?>s
+			</td>
+		</tr>
+		<?php } ?>
+		</tbody>
+	</table>
+</div>
