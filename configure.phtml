@@ -62,6 +62,7 @@
 			<th>Feed</th>
 			<th>Average TTL</th>
 			<th>Adjusted TTL</th>
+			<th>Time until next update</th>
 		</thead>
 		<tbody>
 		<?php foreach ($this->getStats()->fetchAllStats() as $feed) { ?>
@@ -74,6 +75,9 @@
 			</td>
 			<td>
 				<?= $feed['adjusted_ttl'] ?>s
+			</td>
+			<td>
+				<?= $feed['next_update_in'] ?>s
 			</td>
 		</tr>
 		<?php } ?>

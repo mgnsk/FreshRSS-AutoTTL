@@ -51,6 +51,7 @@ SQL;
 SELECT
 	feed.name,
 	feed.ttl,
+	feed.lastUpdate,
 	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avg_ttl,
 	stats.date_max
 FROM (
@@ -69,11 +70,14 @@ SQL;
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
 
         foreach ($res as $i => $feedStat) {
-            $res[$i]['adjusted_ttl'] = $this->calcAdjustedTTL(
+            $adjustedTTL = $this->calcAdjustedTTL(
                 (int) $feedStat['avg_ttl'],
                 (int) $feedStat['ttl'],
                 (int) $feedStat['date_max'],
             );
+            $res[$i]['adjusted_ttl'] = $adjustedTTL;
+            $nextUpdate = (int) $feedStat['lastUpdate'] + $adjustedTTL;
+            $res[$i]['next_update_in'] = $nextUpdate - time();
         }
 
         return $res;
