@@ -64,7 +64,6 @@ FROM (
 	GROUP BY id_feed
 ) AS stats
 LEFT JOIN `feed` ON feed.id = stats.id_feed
-ORDER BY avg_ttl DESC
 SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
@@ -79,6 +78,11 @@ SQL;
             $nextUpdate = (int) $feedStat['lastUpdate'] + $adjustedTTL;
             $res[$i]['next_update_in'] = $nextUpdate - time();
         }
+
+        // Sort here to avoid unix timestamps in SQL for compatibility.
+        usort($res, function ($a, $b) {
+            return $a['next_update_in'] - $b['next_update_in'];
+        });
 
         return $res;
     }
