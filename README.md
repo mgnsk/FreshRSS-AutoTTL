@@ -12,4 +12,5 @@ until the feed becomes active again.
 
 It is recommended to configure each feed to use the default TTL. This will let AutoTTL work most efficiently.
 
-![Screenshot 2023-02-03 at 21-19-02 Extensions · FreshRSS](https://user-images.githubusercontent.com/15255910/216688926-c3705989-d048-4ccd-b242-9edf5ec42686.png)
+![Screenshot](https://user-images.githubusercontent.com/15255910/224358248-e2c30f62-f250-4ec6-9858-2505eded4aae.png)
+
