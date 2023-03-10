@@ -2,19 +2,23 @@
 
 class AutoTTLStats extends Minz_ModelPdo
 {
-    private function calcAdjustedTTL(int $avgTTL, int $minTTL, int $dateMax): int
+    private function calcAdjustedTTL(int $avgTTL, int $feedTTL, int $dateMax): int
     {
-        if ($minTTL == FreshRSS_Feed::TTL_DEFAULT) {
-            $minTTL = FreshRSS_Context::$user_conf->ttl_default;
+        if ($feedTTL == FreshRSS_Feed::TTL_DEFAULT) {
+            $feedTTL = FreshRSS_Context::$user_conf->ttl_default;
         }
 
-        $timeSinceLastEntry = time() - $dateMax;
         $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
+        $timeSinceLastEntry = time() - $dateMax;
+
+        if ($feedTTL > $maxTTL) {
+            return $feedTTL;
+        }
 
         if ($avgTTL === 0 || $avgTTL > $maxTTL || $timeSinceLastEntry > 2 * $maxTTL) {
             return $maxTTL;
-        } elseif ($avgTTL < $minTTL) {
-            return $minTTL;
+        } elseif ($avgTTL < $feedTTL) {
+            return $feedTTL;
         }
 
         return $avgTTL;
@@ -24,7 +28,7 @@ class AutoTTLStats extends Minz_ModelPdo
     {
         $sql = <<<SQL
 SELECT
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avg_ttl,
+	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avgTTL,
 	stats.date_max
 FROM (
 	SELECT
@@ -39,7 +43,7 @@ SQL;
         $res = $stm->fetch(PDO::FETCH_NAMED);
 
         return $this->calcAdjustedTTL(
-            (int) $res['avg_ttl'],
+            (int) $res['avgTTL'],
             $feed->ttl(),
             (int) $res['date_max']
         );
@@ -52,7 +56,7 @@ SELECT
 	feed.name,
 	feed.ttl,
 	feed.lastUpdate,
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avg_ttl,
+	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avgTTL,
 	stats.date_max
 FROM (
 	SELECT
@@ -64,26 +68,53 @@ FROM (
 	GROUP BY id_feed
 ) AS stats
 LEFT JOIN `feed` ON feed.id = stats.id_feed
+ORDER BY avgTTL ASC
 SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
+        $now = new \DateTime();
+        $now->setTimezone(new DateTimeZone(date_default_timezone_get()));
 
         foreach ($res as $i => $feedStat) {
             $adjustedTTL = $this->calcAdjustedTTL(
-                (int) $feedStat['avg_ttl'],
+                (int) $feedStat['avgTTL'],
                 (int) $feedStat['ttl'],
                 (int) $feedStat['date_max'],
             );
-            $res[$i]['adjusted_ttl'] = $adjustedTTL;
-            $nextUpdate = (int) $feedStat['lastUpdate'] + $adjustedTTL;
-            $res[$i]['next_update_in'] = $nextUpdate - time();
-        }
+            $res[$i]['adjustedTTL'] = $adjustedTTL;
 
-        // Sort here to avoid unix timestamps in SQL for compatibility.
-        usort($res, function ($a, $b) {
-            return $a['next_update_in'] - $b['next_update_in'];
-        });
+            $nextUpdate = DateTime::createFromFormat('U', (int) $feedStat['lastUpdate'] + $adjustedTTL);
+            $nextUpdate->setTimezone(new DateTimeZone(date_default_timezone_get()));
+            $res[$i]['nextUpdateAfter'] = human_interval($nextUpdate->diff($now));
+        }
 
         return $res;
     }
+}
+
+function human_interval(\DateInterval $interval): string
+{
+    $results = [];
+
+    if ($interval->y > 0) {
+        $results[] = "{$interval->y} years";
+    }
+
+    if ($interval->m > 0) {
+        $results[] = "{$interval->m} months";
+    }
+
+    if ($interval->d > 0) {
+        $results[] = "{$interval->d} days";
+    }
+
+    if ($interval->h > 0) {
+        $results[] = "{$interval->h} hours";
+    }
+
+    if ($interval->i > 0) {
+        $results[] = "{$interval->i} minutes";
+    }
+
+    return join(" ", $results);
 }
