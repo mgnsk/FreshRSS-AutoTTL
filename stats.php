@@ -35,7 +35,7 @@ FROM (
 		COUNT(1) AS count,
 		MIN(date) AS date_min,
 		MAX(date) AS date_max
-	FROM `entry`
+	FROM `_entry`
 	WHERE id_feed = {$feed->id()}
 ) stats
 SQL;
@@ -64,7 +64,7 @@ FROM (
 		COUNT(1) AS count,
 		MIN(date) AS date_min,
 		MAX(date) AS date_max
-	FROM `entry`
+	FROM `_entry`
 	GROUP BY id_feed
 ) AS stats
 LEFT JOIN `feed` ON feed.id = stats.id_feed
