@@ -67,7 +67,7 @@ FROM (
 	FROM `_entry`
 	GROUP BY id_feed
 ) AS stats
-LEFT JOIN `feed` ON feed.id = stats.id_feed
+LEFT JOIN `_feed` as feed ON feed.id = stats.id_feed
 ORDER BY avgTTL ASC
 SQL;
         $stm = $this->pdo->query($sql);
