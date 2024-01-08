@@ -51,6 +51,8 @@ SQL;
 
     public function fetchAllStats(): array
     {
+        $limit = FreshRSS_Context::$user_conf->auto_ttl_stats_count;
+
         $sql = <<<SQL
 SELECT
 	feed.name,
@@ -69,6 +71,7 @@ FROM (
 ) AS stats
 LEFT JOIN `_feed` as feed ON feed.id = stats.id_feed
 ORDER BY `avgTTL` ASC
+LIMIT {$limit}
 SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);

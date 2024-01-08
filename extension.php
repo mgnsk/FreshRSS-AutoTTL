@@ -6,6 +6,7 @@ class AutoTTLExtension extends Minz_Extension
 {
     // Defaults
     private const MAX_TTL = 24 * 60 * 60; // 1 day
+    private const STATS_COUNT = 100;
 
     /**
      * @var AutoTTLStats
@@ -24,6 +25,11 @@ class AutoTTLExtension extends Minz_Extension
             FreshRSS_Context::$user_conf->auto_ttl_max_ttl = self::MAX_TTL;
             FreshRSS_Context::$user_conf->save();
         }
+
+        if (is_null(FreshRSS_Context::$user_conf->auto_ttl_stats_count)) {
+            FreshRSS_Context::$user_conf->auto_ttl_stats_count = self::STATS_COUNT;
+            FreshRSS_Context::$user_conf->save();
+        }
     }
 
     public function handleConfigureAction()
@@ -34,6 +40,10 @@ class AutoTTLExtension extends Minz_Extension
             FreshRSS_Context::$user_conf->auto_ttl_max_ttl = (int) Minz_Request::param(
                 'auto_ttl_max_ttl',
                 self::MAX_TTL
+            );
+            FreshRSS_Context::$user_conf->auto_ttl_stats_count = (int) Minz_Request::param(
+                'auto_ttl_stats_count',
+                self::STATS_COUNT
             );
             FreshRSS_Context::$user_conf->save();
         }
