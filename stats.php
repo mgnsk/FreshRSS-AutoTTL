@@ -28,7 +28,7 @@ class AutoTTLStats extends Minz_ModelPdo
     {
         $sql = <<<SQL
 SELECT
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avgTTL,
+	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,
 	stats.date_max
 FROM (
 	SELECT
@@ -55,8 +55,8 @@ SQL;
 SELECT
 	feed.name,
 	feed.ttl,
-	feed.lastUpdate,
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS avgTTL,
+	feed.`lastUpdate`,
+	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,
 	stats.date_max
 FROM (
 	SELECT
@@ -68,7 +68,7 @@ FROM (
 	GROUP BY id_feed
 ) AS stats
 LEFT JOIN `_feed` as feed ON feed.id = stats.id_feed
-ORDER BY avgTTL ASC
+ORDER BY `avgTTL` ASC
 SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
