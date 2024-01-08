@@ -46,6 +46,10 @@
 				} ?>
 			</select>
 		</div>
+		<label class="group-name" for="auto_ttl_stats_count">Statistics table rows</label>
+		<div class="group-controls">
+			<input type="number" min="1" value="<?php echo FreshRSS_Context::$user_conf->auto_ttl_stats_count; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" required="required" />
+		</div>
 	</div>
 	<div class="form-group form-actions">
 		<div class="group-controls">
