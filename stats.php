@@ -2,29 +2,26 @@
 
 class AutoTTLStats extends Minz_ModelPdo
 {
-    private function calcAdjustedTTL(int $avgTTL, int $feedTTL, int $dateMax): int
+    private function calcAdjustedTTL(int $avgTTL, int $dateMax): int
     {
-        if ($feedTTL == FreshRSS_Feed::TTL_DEFAULT) {
-            $feedTTL = FreshRSS_Context::$user_conf->ttl_default;
-        }
-
+        $defaultTTL = FreshRSS_Context::$user_conf->ttl_default;
         $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
         $timeSinceLastEntry = time() - $dateMax;
 
-        if ($feedTTL > $maxTTL) {
-            return $feedTTL;
+        if ($defaultTTL > $maxTTL) {
+            return $defaultTTL;
         }
 
         if ($avgTTL === 0 || $avgTTL > $maxTTL || $timeSinceLastEntry > 2 * $maxTTL) {
             return $maxTTL;
-        } elseif ($avgTTL < $feedTTL) {
-            return $feedTTL;
+        } elseif ($avgTTL < $defaultTTL) {
+            return $defaultTTL;
         }
 
         return $avgTTL;
     }
 
-    public function getAdjustedTTL(FreshRSS_Feed $feed): int
+    public function getAdjustedTTL(int $feedID): int
     {
         $sql = <<<SQL
 SELECT
@@ -36,7 +33,7 @@ FROM (
 		MIN(date) AS date_min,
 		MAX(date) AS date_max
 	FROM `_entry`
-	WHERE id_feed = {$feed->id()}
+	WHERE id_feed = {$feedID}
 ) stats
 SQL;
         $stm = $this->pdo->query($sql);
@@ -44,11 +41,11 @@ SQL;
 
         return $this->calcAdjustedTTL(
             (int) $res['avgTTL'],
-            $feed->ttl(),
             (int) $res['date_max']
         );
     }
 
+    // fetchAllStats returns stats for AutoTTL enabled feeds.
     public function fetchAllStats(): array
     {
         $limit = FreshRSS_Context::$user_conf->auto_ttl_stats_count;
@@ -56,7 +53,6 @@ SQL;
         $sql = <<<SQL
 SELECT
 	feed.name,
-	feed.ttl,
 	feed.`lastUpdate`,
 	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,
 	stats.date_max
@@ -70,6 +66,7 @@ FROM (
 	GROUP BY id_feed
 ) AS stats
 LEFT JOIN `_feed` as feed ON feed.id = stats.id_feed
+WHERE feed.ttl = 0
 ORDER BY `avgTTL` ASC
 LIMIT {$limit}
 SQL;
@@ -81,7 +78,6 @@ SQL;
         foreach ($res as $i => $feedStat) {
             $adjustedTTL = $this->calcAdjustedTTL(
                 (int) $feedStat['avgTTL'],
-                (int) $feedStat['ttl'],
                 (int) $feedStat['date_max'],
             );
             $res[$i]['adjustedTTL'] = $adjustedTTL;
@@ -119,5 +115,5 @@ function human_interval(\DateInterval $interval): string
         $results[] = "{$interval->i} minutes";
     }
 
-    return join(" ", $results);
+    return implode(' ', $results);
 }

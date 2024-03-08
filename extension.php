@@ -60,8 +60,12 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
+        if ($feed->ttl() !== FreshRSS_Feed::TTL_DEFAULT) {
+            return $feed;
+        }
+
         $timeSinceLastUpdate = time() - $feed->lastUpdate();
-        $ttl = $this->stats->getAdjustedTTL($feed);
+        $ttl = $this->stats->getAdjustedTTL($feed->id());
 
         if ($timeSinceLastUpdate < $ttl) {
             Minz_Log::debug(
