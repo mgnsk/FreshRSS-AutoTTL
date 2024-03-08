@@ -59,30 +59,70 @@
 	</div>
 </form>
 
+<?php
+$now = new \DateTime();
+$now->setTimezone(new DateTimeZone(date_default_timezone_get()));
+?>
+
 <div class="table-wrapper">
-	<h2>Feed frequency statistics for AutoTTL enabled feeds</h2>
+	<h2>Feeds using AutoTTL</h2>
+	<table>
+		<thead>
+			<th>Feed</th>
+			<th>Average TTL</th>
+			<th>Adjusted update TTL</th>
+			<th>Time until next update</th>
+		</thead>
+		<tbody>
+		<?php foreach ($this->getStats()->getFeedStats(true) as $feed) { ?>
+		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed['avgTTL'], $feed['date_max']); ?>
+		<tr>
+			<td>
+				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed['id']) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
+				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
+			</td>
+			<td>
+				<?= $this->getStats()->humanIntervalFromSeconds($feed['avgTTL']) ?>
+			</td>
+			<td>
+				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
+			</td>
+			<td>
+			<?php $nextUpdate = DateTime::createFromFormat('U', $feed['lastUpdate'] + $adjustedTTL)->setTimezone(new DateTimeZone(date_default_timezone_get())); ?>
+			<?= $this->getStats()->humanInterval($nextUpdate->diff($now)) ?>
+			</td>
+		</tr>
+		<?php } ?>
+		</tbody>
+	</table>
+</div>
+
+<div class="table-wrapper">
+	<h2>Feeds not using AutoTTL</h2>
 	<p>To enable AutoTTL for a feed, configure the feed's "Do not automatically refresh more often than" option to "By default".</p>
 	<table>
 		<thead>
 			<th>Feed</th>
 			<th>Average TTL</th>
-			<th>Adjusted TTL</th>
+			<th>Update TTL</th>
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->fetchAllStats() as $feed) { ?>
+		<?php foreach ($this->getStats()->getFeedStats(false) as $feed) { ?>
 		<tr>
 			<td>
+				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed['id']) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
 				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
-				<?= $feed['avgTTL'] ?>s
+				<?= $this->getStats()->humanIntervalFromSeconds($feed['avgTTL']) ?>
 			</td>
 			<td>
-				<?= $feed['adjustedTTL'] ?>s
+				<?= $this->getStats()->humanIntervalFromSeconds($feed['ttl']) ?>
 			</td>
 			<td>
-				<?= $feed['nextUpdateAfter'] ?>
+			<?php $nextUpdate = DateTime::createFromFormat('U', $feed['lastUpdate'] + $feed['ttl'])->setTimezone(new DateTimeZone(date_default_timezone_get())); ?>
+			<?= $this->getStats()->humanInterval($nextUpdate->diff($now)) ?>
 			</td>
 		</tr>
 		<?php } ?>
