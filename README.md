@@ -12,4 +12,4 @@ Feed update interval is at least once per max TTL but no more often than default
 
 When a feed becomes idle (the last entry is more than 2x max TTL ago), the feed will fall back to be updated once every max TTL until the feed becomes active again.
 
-![Screenshot 2024-03-08 at 22-45-24 Extensions · FreshRSS](https://github.com/mgnsk/FreshRSS-AutoTTL/assets/15255910/6811b5d3-0820-4d88-b1fa-0bd4f8c0e9e9)
+![Screenshot 2024-03-09 at 01-54-04 AutoTTL · Extensions · FreshRSS](https://github.com/mgnsk/FreshRSS-AutoTTL/assets/15255910/e5b2fec6-2263-4abb-97da-4b28726c1f2b)
