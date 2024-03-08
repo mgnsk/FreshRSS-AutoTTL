@@ -52,6 +52,7 @@ SQL;
 
         $sql = <<<SQL
 SELECT
+	feed.id,
 	feed.name,
 	feed.`lastUpdate`,
 	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,

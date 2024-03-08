@@ -73,6 +73,7 @@
 		<?php foreach ($this->getStats()->fetchAllStats() as $feed) { ?>
 		<tr>
 			<td>
+				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed['id']) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
 				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
