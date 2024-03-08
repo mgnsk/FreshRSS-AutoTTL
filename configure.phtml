@@ -74,7 +74,7 @@ $now->setTimezone(new DateTimeZone(date_default_timezone_get()));
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getAutoTTLFeeds() as $feed) { ?>
+		<?php foreach ($this->getStats()->getFeedStats(true) as $feed) { ?>
 		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed['avgTTL'], $feed['date_max']); ?>
 		<tr>
 			<td>
@@ -108,7 +108,7 @@ $now->setTimezone(new DateTimeZone(date_default_timezone_get()));
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getNonAutoTTLFeeds() as $feed) { ?>
+		<?php foreach ($this->getStats()->getFeedStats(false) as $feed) { ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed['id']) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
