@@ -1,14 +1,15 @@
 # FreshRSS-AutoTTL extension
 
 A FreshRSS extension for automatic feed refresh TTL based on the average frequency of entries.
-It handles only feeds which use the default TTL option.
+It dynamically adjusts the update TTL of feeds which use the default TTL option.
 
 # Configuration
+The main configurable value is the max TTL.
+Feeds that use the default TTL are updated at an interval between the default and max TTL.
+It is recommended to configure max TTL to be greater than default TTL.
 
-The extension has a single configurable value - the max TTL which is 1 day by default.
-It is recommended to configure max TTL to be greater than default TTL. For example `1d` and `1h`.
-
-Feed update interval is at least once per max TTL but no more often than default TTL.
+For example with default TTL of `1h` and max TTL of `1d`, a feed is updated at least once per day but no more often than once per hour
+depending on the average frequency of entries.
 
 When a feed becomes idle (the last entry is more than 2x max TTL ago), the feed will fall back to be updated once every max TTL until the feed becomes active again.
 
