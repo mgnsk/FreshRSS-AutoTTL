@@ -60,8 +60,7 @@
 </form>
 
 <?php
-$now = new \DateTime();
-$now->setTimezone(new DateTimeZone(date_default_timezone_get()));
+$now = time();
 ?>
 
 <div class="table-wrapper">
@@ -88,8 +87,7 @@ $now->setTimezone(new DateTimeZone(date_default_timezone_get()));
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-			<?php $nextUpdate = DateTime::createFromFormat('U', $feed['lastUpdate'] + $adjustedTTL)->setTimezone(new DateTimeZone(date_default_timezone_get())); ?>
-			<?= $this->getStats()->humanInterval($nextUpdate->diff($now)) ?>
+			<?= $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $adjustedTTL - $now) ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -121,8 +119,7 @@ $now->setTimezone(new DateTimeZone(date_default_timezone_get()));
 				<?= $this->getStats()->humanIntervalFromSeconds($feed['ttl']) ?>
 			</td>
 			<td>
-			<?php $nextUpdate = DateTime::createFromFormat('U', $feed['lastUpdate'] + $feed['ttl'])->setTimezone(new DateTimeZone(date_default_timezone_get())); ?>
-			<?= $this->getStats()->humanInterval($nextUpdate->diff($now)) ?>
+			<?= $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $feed['ttl'] - $now) ?>
 			</td>
 		</tr>
 		<?php } ?>

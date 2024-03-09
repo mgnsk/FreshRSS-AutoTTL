@@ -84,8 +84,12 @@ SQL;
         return $res;
     }
 
-    public function humanInterval(\DateInterval $interval): string
+    public function humanIntervalFromSeconds(int $seconds): string
     {
+        $from = new \DateTime('@0');
+        $to = new \DateTime("@$seconds");
+        $interval = $from->diff($to);
+
         $results = [];
 
         if ($interval->y === 1) {
@@ -119,14 +123,5 @@ SQL;
         }
 
         return implode(' ', $results);
-    }
-
-    public function humanIntervalFromSeconds(int $seconds): string
-    {
-        $from = new \DateTime('@0');
-        $to = new \DateTime("@$seconds");
-        $interval = $from->diff($to);
-
-        return $this->humanInterval($interval);
     }
 }
