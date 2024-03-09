@@ -25,24 +25,16 @@ class AutoTTLStats extends Minz_ModelPdo
     {
         $sql = <<<SQL
 SELECT
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,
-	stats.date_max
-FROM (
-	SELECT
-		COUNT(1) AS count,
-		MIN(date) AS date_min,
-		MAX(date) AS date_max
-	FROM `_entry`
-	WHERE id_feed = {$feedID}
-) stats
+	CASE WHEN COUNT(1) > 0 THEN ((MAX(stats.date) - MIN(stats.date)) / COUNT(1)) ELSE 0 END AS `avgTTL`,
+	MAX(stats.date) AS date_max
+FROM `_entry` AS stats
+WHERE id_feed = {$feedID}
 SQL;
+
         $stm = $this->pdo->query($sql);
         $res = $stm->fetch(PDO::FETCH_NAMED);
 
-        return $this->calcAdjustedTTL(
-            (int) $res['avgTTL'],
-            (int) $res['date_max']
-        );
+        return $this->calcAdjustedTTL($res['avgTTL'], $res['date_max']);
     }
 
     public function getFeedStats(bool $autoTTL): array
@@ -58,26 +50,20 @@ SQL;
 
         $sql = <<<SQL
 SELECT
-	feed.id,
+	stats.id_feed,
 	feed.name,
 	feed.`lastUpdate`,
 	feed.ttl,
-	CASE WHEN stats.count > 0 THEN ((stats.date_max - stats.date_min) / stats.count) ELSE 0 END AS `avgTTL`,
-	stats.date_max
-FROM (
-	SELECT
-		id_feed,
-		COUNT(1) AS count,
-		MIN(date) AS date_min,
-		MAX(date) AS date_max
-	FROM `_entry`
-	GROUP BY id_feed
-) AS stats
-LEFT JOIN `_feed` as feed ON feed.id = stats.id_feed
+	CASE WHEN COUNT(1) > 0 THEN ((MAX(stats.date) - MIN(stats.date)) / COUNT(1)) ELSE 0 END AS `avgTTL`,
+	MAX(stats.date) AS date_max
+FROM `_entry` AS stats
+JOIN `_feed` AS feed ON feed.id = stats.id_feed
 WHERE {$where}
+GROUP BY stats.id_feed
 ORDER BY `avgTTL` ASC
 LIMIT {$limit}
 SQL;
+
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
 
