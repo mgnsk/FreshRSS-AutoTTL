@@ -87,7 +87,7 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-			<?= $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $adjustedTTL - $now) ?>
+			<?= ($feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $adjustedTTL - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -119,7 +119,7 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed['ttl']) ?>
 			</td>
 			<td>
-			<?= $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $feed['ttl'] - $now) ?>
+			<?= ($feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $feed['ttl'] - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>
