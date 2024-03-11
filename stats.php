@@ -1,5 +1,37 @@
 <?php
 
+class StatItem
+{
+    public int $id;
+    public string $name;
+    public int $lastUpdate;
+    public int $ttl;
+    public int $avgTTL;
+    public int $dateMax;
+
+    public function __construct(array $feed)
+    {
+        $this->id = (int) $feed['id'];
+        $this->name = $feed['name'];
+        $this->lastUpdate = (int) $feed['lastUpdate'];
+        $this->ttl = (int) $feed['ttl'];
+        $this->avgTTL = (int) $feed['avgTTL'];
+        $this->dateMax = (int) $feed['date_max'];
+    }
+
+    public function isActive(int $now): bool
+    {
+        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
+        $timeSinceLastEntry = $now - $this->dateMax;
+
+        if ($timeSinceLastEntry > 2 * $maxTTL) {
+            return false;
+        }
+
+        return true;
+    }
+}
+
 class AutoTTLStats extends Minz_ModelPdo
 {
     public function calcAdjustedTTL(int $avgTTL, int $dateMax): int
@@ -50,37 +82,29 @@ SQL;
 
         $sql = <<<SQL
 SELECT
-	stats.id_feed,
+	feed.id,
 	feed.name,
 	feed.`lastUpdate`,
 	feed.ttl,
 	CASE WHEN COUNT(1) > 0 THEN ((MAX(stats.date) - MIN(stats.date)) / COUNT(1)) ELSE 0 END AS `avgTTL`,
 	MAX(stats.date) AS date_max
-FROM `_entry` AS stats
-JOIN `_feed` AS feed ON feed.id = stats.id_feed
+FROM `_feed` AS feed
+LEFT JOIN `_entry` AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY stats.id_feed
 ORDER BY `avgTTL` ASC
 LIMIT {$limit}
 SQL;
 
-        // TODO: fetch into class
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
 
-        $now = time();
-        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
-
-        foreach ($res as $i => $feed) {
-            $timeSinceLastEntry = $now - (int) $feed['date_max'];
-            if ($timeSinceLastEntry > 2 * $maxTTL) {
-                $res[$i]['active'] = false;
-            } else {
-                $res[$i]['active'] = true;
-            }
+        $list = [];
+        foreach ($res as $feed) {
+            $list[] = new StatItem($feed);
         }
 
-        return $res;
+        return $list;
     }
 
     public function humanIntervalFromSeconds(int $seconds): string
