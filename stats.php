@@ -34,7 +34,7 @@ SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetch(PDO::FETCH_NAMED);
 
-        return $this->calcAdjustedTTL($res['avgTTL'], $res['date_max']);
+        return $this->calcAdjustedTTL((int) $res['avgTTL'], (int) $res['date_max']);
     }
 
     public function getFeedStats(bool $autoTTL): array

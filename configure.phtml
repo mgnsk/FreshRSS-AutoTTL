@@ -74,20 +74,20 @@ $now = time();
 		</thead>
 		<tbody>
 		<?php foreach ($this->getStats()->getFeedStats(true) as $feed) { ?>
-		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed['avgTTL'], $feed['date_max']); ?>
+		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL((int) $feed['avgTTL'], (int) $feed['date_max']); ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed['id']) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
 				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
-				<?= $this->getStats()->humanIntervalFromSeconds($feed['avgTTL']) ?>
+				<?= $this->getStats()->humanIntervalFromSeconds((int) $feed['avgTTL']) ?>
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-			<?= ($feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $adjustedTTL - $now) : "" ?>
+			<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + $adjustedTTL - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -113,13 +113,13 @@ $now = time();
 				<?= htmlspecialchars($feed['name'], ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
-				<?= $this->getStats()->humanIntervalFromSeconds($feed['avgTTL']) ?>
+				<?= $this->getStats()->humanIntervalFromSeconds((int) $feed['avgTTL']) ?>
 			</td>
 			<td>
-				<?= $this->getStats()->humanIntervalFromSeconds($feed['ttl']) ?>
+				<?= $this->getStats()->humanIntervalFromSeconds((int) $feed['ttl']) ?>
 			</td>
 			<td>
-			<?= ($feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds($feed['lastUpdate'] + $feed['ttl'] - $now) : "" ?>
+			<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + (int) $feed['ttl'] - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>
