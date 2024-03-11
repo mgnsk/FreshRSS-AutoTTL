@@ -69,6 +69,7 @@ $now = time();
 		<thead>
 			<th>Feed</th>
 			<th>Average TTL</th>
+			<th>Status</th>
 			<th>Adjusted update TTL</th>
 			<th>Time until next update</th>
 		</thead>
@@ -84,10 +85,13 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds((int) $feed['avgTTL']) ?>
 			</td>
 			<td>
+				<?= $feed['active'] === true ? "active" : "inactive" ?>
+			</td>
+			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-			<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + $adjustedTTL - $now) : "" ?>
+				<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + $adjustedTTL - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -119,7 +123,7 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds((int) $feed['ttl']) ?>
 			</td>
 			<td>
-			<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + (int) $feed['ttl'] - $now) : "" ?>
+				<?= ((int) $feed['lastUpdate'] > 0) ? $this->getStats()->humanIntervalFromSeconds((int) $feed['lastUpdate'] + (int) $feed['ttl'] - $now) : "" ?>
 			</td>
 		</tr>
 		<?php } ?>

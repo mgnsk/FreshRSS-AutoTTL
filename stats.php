@@ -64,8 +64,21 @@ ORDER BY `avgTTL` ASC
 LIMIT {$limit}
 SQL;
 
+        // TODO: fetch into class
         $stm = $this->pdo->query($sql);
         $res = $stm->fetchAll(PDO::FETCH_NAMED);
+
+        $now = time();
+        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
+
+        foreach ($res as $i => $feed) {
+            $timeSinceLastEntry = $now - (int) $feed['date_max'];
+            if ($timeSinceLastEntry > 2 * $maxTTL) {
+                $res[$i]['active'] = false;
+            } else {
+                $res[$i]['active'] = true;
+            }
+        }
 
         return $res;
     }
