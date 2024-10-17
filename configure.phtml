@@ -96,12 +96,15 @@ $now = time();
 			<td>
 				<?php
 					if ($feed->lastUpdate > 0) {
-						$interval = $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $adjustedTTL - $now);
-						if ($interval === "") {
-							echo "pending";
-						} else {
+						$timeUntil = $feed->lastUpdate + $adjustedTTL - $now;
+						if ($timeUntil > 0) {
+							$interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
 							echo $interval;
+						} else {
+							echo "pending";
 						}
+					} else {
+						echo "never updated";
 					}
 				?>
 			</td>
@@ -141,12 +144,15 @@ $now = time();
 			<td>
 				<?php
 					if ($feed->lastUpdate > 0) {
-						$interval = $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $feed->ttl - $now);
-						if ($interval === "") {
-							echo "pending";
-						} else {
+						$timeUntil = $feed->lastUpdate + $feed->ttl - $now;
+						if ($timeUntil > 0) {
+							$interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
 							echo $interval;
+						} else {
+							echo "pending";
 						}
+					} else {
+						echo "never updated";
 					}
 				?>
 			</td>
