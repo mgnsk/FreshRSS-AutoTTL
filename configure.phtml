@@ -91,10 +91,19 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) : "" ?> ago
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) . " ago" : "never" ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $adjustedTTL - $now) : "" ?>
+				<?php
+					if ($feed->lastUpdate > 0) {
+						$interval = $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $adjustedTTL - $now);
+						if ($interval === "") {
+							echo "pending";
+						} else {
+							echo $interval;
+						}
+					}
+				?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -127,10 +136,19 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) : "" ?> ago
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) . " ago" : "never" ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $feed->ttl - $now) : "" ?>
+				<?php
+					if ($feed->lastUpdate > 0) {
+						$interval = $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $feed->ttl - $now);
+						if ($interval === "") {
+							echo "pending";
+						} else {
+							echo $interval;
+						}
+					}
+				?>
 			</td>
 		</tr>
 		<?php } ?>
