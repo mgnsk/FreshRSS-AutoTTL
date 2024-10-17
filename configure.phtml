@@ -91,7 +91,7 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate) : "" ?>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate) : "" ?> ago
 			</td>
 			<td>
 				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $adjustedTTL - $now) : "" ?>
@@ -110,6 +110,7 @@ $now = time();
 			<th>Feed</th>
 			<th>Average TTL</th>
 			<th>Update TTL</th>
+			<th>Last update</th>
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
@@ -124,6 +125,9 @@ $now = time();
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>
+			</td>
+			<td>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate) : "" ?> ago
 			</td>
 			<td>
 				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $feed->ttl - $now) : "" ?>
