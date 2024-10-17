@@ -57,10 +57,24 @@ class AutoTTLExtension extends Minz_Extension
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
         if ($feed->lastUpdate() === 0) {
+            Minz_Log::debug(
+                sprintf(
+                    'AutoTTL: feed %d (%s) never updated, updating now',
+                    $feed->id(),
+                    $feed->name(),
+                )
+            );
             return $feed;
         }
 
         if ($feed->ttl() !== FreshRSS_Feed::TTL_DEFAULT) {
+            Minz_Log::debug(
+                sprintf(
+                    'AutoTTL: feed %d (%s) not using default TTL, updating now',
+                    $feed->id(),
+                    $feed->name(),
+                )
+            );
             return $feed;
         }
 
@@ -79,6 +93,16 @@ class AutoTTLExtension extends Minz_Extension
             );
             return null;
         }
+
+        Minz_Log::debug(
+            sprintf(
+                'AutoTTL: updating feed %d (%s, last update %s, adjusted TTL %ds)',
+                $feed->id(),
+                $feed->name(),
+                date('r', $feed->lastUpdate()),
+                $ttl,
+            )
+        );
 
         return $feed;
     }
