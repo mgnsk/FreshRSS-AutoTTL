@@ -143,6 +143,10 @@ SQL;
             $results[] = "{$interval->i} minute";
         } elseif ($interval->i > 1) {
             $results[] = "{$interval->i} minutes";
+        } elseif ($interval->i === 0 && $interval->s === 1) {
+            $results[] = "{$interval->s} second";
+        } elseif ($interval->i === 0 && $interval->s > 1) {
+            $results[] = "{$interval->s} seconds";
         }
 
         return implode(' ', $results);
