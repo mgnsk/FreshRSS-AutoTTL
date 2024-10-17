@@ -34,8 +34,7 @@
 				        1814400 => '3wk',
 				        2419200 => '4wk',
 				        2629744 => '1mo',
-				    ]
-				    as $v => $t
+				    ] as $v => $t
 				) {
 				    echo '<option value="' .
 				        $v .
@@ -71,6 +70,7 @@ $now = time();
 			<th>Average TTL</th>
 			<th>Status</th>
 			<th>Adjusted update TTL</th>
+			<th>Last update</th>
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
@@ -89,6 +89,9 @@ $now = time();
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
+			</td>
+			<td>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate) : "" ?>
 			</td>
 			<td>
 				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->lastUpdate + $adjustedTTL - $now) : "" ?>
