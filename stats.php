@@ -3,13 +3,20 @@
 class StatItem
 {
     public int $id;
+
     public string $name;
+
     public int $lastUpdate;
+
     public int $ttl;
+
     public int $avgTTL;
+
     public int $dateMax;
 
-    public function __construct(array $feed)
+    private int $maxTTL;
+
+    public function __construct(array $feed, int $maxTTL)
     {
         $this->id = (int) $feed['id'];
         $this->name = $feed['name'];
@@ -17,14 +24,14 @@ class StatItem
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
         $this->dateMax = (int) $feed['date_max'];
+        $this->maxTTL = $maxTTL;
     }
 
     public function isActive(int $now): bool
     {
-        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
         $timeSinceLastEntry = $now - $this->dateMax;
 
-        if ($timeSinceLastEntry > 2 * $maxTTL) {
+        if ($timeSinceLastEntry > 2 * $this->maxTTL) {
             return false;
         }
 
@@ -34,20 +41,42 @@ class StatItem
 
 class AutoTTLStats extends Minz_ModelPdo
 {
+    /**
+     * @var int
+     */
+    private $defaultTTL;
+
+    /**
+     * @var int
+     */
+    private $maxTTL;
+
+    /**
+     * @var int
+     */
+    private $statsCount;
+
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount)
+    {
+        parent::__construct();
+
+        $this->defaultTTL = $defaultTTL;
+        $this->maxTTL = $maxTTL;
+        $this->statsCount = $statsCount;
+    }
+
     public function calcAdjustedTTL(int $avgTTL, int $dateMax): int
     {
-        $defaultTTL = FreshRSS_Context::$user_conf->ttl_default;
-        $maxTTL = (int) FreshRSS_Context::$user_conf->auto_ttl_max_ttl;
         $timeSinceLastEntry = time() - $dateMax;
 
-        if ($defaultTTL > $maxTTL) {
-            return $defaultTTL;
+        if ($this->defaultTTL > $this->maxTTL) {
+            return $this->defaultTTL;
         }
 
-        if ($avgTTL === 0 || $avgTTL > $maxTTL || $timeSinceLastEntry > 2 * $maxTTL) {
-            return $maxTTL;
-        } elseif ($avgTTL < $defaultTTL) {
-            return $defaultTTL;
+        if ($avgTTL === 0 || $avgTTL > $this->maxTTL || $timeSinceLastEntry > 2 * $this->maxTTL) {
+            return $this->maxTTL;
+        } elseif ($avgTTL < $this->defaultTTL) {
+            return $this->defaultTTL;
         }
 
         return $avgTTL;
@@ -71,13 +100,11 @@ SQL;
 
     public function getFeedStats(bool $autoTTL): array
     {
-        $limit = FreshRSS_Context::$user_conf->auto_ttl_stats_count;
-
-        $where = "";
+        $where = '';
         if ($autoTTL) {
-            $where = "feed.ttl = 0";
+            $where = 'feed.ttl = 0';
         } else {
-            $where = "feed.ttl != 0";
+            $where = 'feed.ttl != 0';
         }
 
         $sql = <<<SQL
@@ -93,7 +120,7 @@ LEFT JOIN `_entry` AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY stats.id_feed
 ORDER BY `avgTTL` ASC
-LIMIT {$limit}
+LIMIT {$this->statsCount}
 SQL;
 
         $stm = $this->pdo->query($sql);
@@ -101,7 +128,7 @@ SQL;
 
         $list = [];
         foreach ($res as $feed) {
-            $list[] = new StatItem($feed);
+            $list[] = new StatItem($feed, $this->maxTTL);
         }
 
         return $list;

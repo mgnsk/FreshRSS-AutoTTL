@@ -36,18 +36,19 @@
 				        2629744 => '1mo',
 				    ] as $v => $t
 				) {
-				    echo '<option value="' .
-				        $v .
-				        ((int)FreshRSS_Context::$user_conf->auto_ttl_max_ttl === $v ? '" selected="selected' : '') .
-				        '">' .
-				        $t .
+				    echo '<option value="'.
+				        $v.
+				        ($this->maxTTL === $v ? '" selected="selected' : '').
+				        '">'.
+				        $t.
 				        '</option>';
 				} ?>
 			</select>
+<?php var_dump($this->maxTTL); ?>
 		</div>
 		<label class="group-name" for="auto_ttl_stats_count">Statistics table rows</label>
 		<div class="group-controls">
-			<input type="number" min="1" value="<?php echo FreshRSS_Context::$user_conf->auto_ttl_stats_count; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" required="required" />
+			<input type="number" min="1" value="<?php echo $this->statsCount; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" required="required" />
 		</div>
 	</div>
 	<div class="form-group form-actions">
@@ -85,28 +86,28 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) ?>
 			</td>
 			<td>
-				<?= $feed->isActive($now) ? "active" : "idle" ?>
+				<?= $feed->isActive($now) ? 'active' : 'idle' ?>
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) . " ago" : "never" ?>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
 			</td>
 			<td>
 				<?php
-					if ($feed->lastUpdate > 0) {
-						$timeUntil = $feed->lastUpdate + $adjustedTTL - $now;
-						if ($timeUntil > 0) {
-							$interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-							echo $interval;
-						} else {
-							echo "pending";
-						}
-					} else {
-						echo "never updated";
-					}
-				?>
+                    if ($feed->lastUpdate > 0) {
+                        $timeUntil = $feed->lastUpdate + $adjustedTTL - $now;
+                        if ($timeUntil > 0) {
+                            $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
+                            echo $interval;
+                        } else {
+                            echo 'pending';
+                        }
+                    } else {
+                        echo 'never updated';
+                    }
+		    ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -139,22 +140,22 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate) . " ago" : "never" ?>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
 			</td>
 			<td>
 				<?php
-					if ($feed->lastUpdate > 0) {
-						$timeUntil = $feed->lastUpdate + $feed->ttl - $now;
-						if ($timeUntil > 0) {
-							$interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-							echo $interval;
-						} else {
-							echo "pending";
-						}
-					} else {
-						echo "never updated";
-					}
-				?>
+		        if ($feed->lastUpdate > 0) {
+		            $timeUntil = $feed->lastUpdate + $feed->ttl - $now;
+		            if ($timeUntil > 0) {
+		                $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
+		                echo $interval;
+		            } else {
+		                echo 'pending';
+		            }
+		        } else {
+		            echo 'never updated';
+		        }
+		    ?>
 			</td>
 		</tr>
 		<?php } ?>
