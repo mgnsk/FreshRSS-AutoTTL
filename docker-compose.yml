@@ -1,0 +1,38 @@
+---
+services:
+  mysql:
+    image: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: freshrss
+      MYSQL_PASSWORD: freshrss
+      MYSQL_DATABASE: freshrss
+    tmpfs:
+      - /var/lib/mysql:uid=999,gid=999
+
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: freshrss
+      POSTGRES_USER: freshrss
+      POSTGRES_DB: freshrss
+    tmpfs:
+      - /var/lib/postgresql:uid=999,gid=999
+
+  freshrss:
+    image: freshrss/freshrss:latest
+    container_name: freshrss
+    hostname: freshrss
+    restart: unless-stopped
+    logging:
+      options:
+        max-size: 10m
+    volumes:
+      - .:/var/www/FreshRSS/extensions/FreshRSS-AutoTTL
+    environment:
+      CRON_MIN: '*'
+      TRUSTED_PROXY: 172.16.0.1/12 192.168.0.1/16
+      FRESHRSS_ENV: development
+    ports:
+      - "8080:80"
