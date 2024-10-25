@@ -118,7 +118,7 @@ SELECT
 FROM `_feed` AS feed
 LEFT JOIN `_entry` AS stats ON feed.id = stats.id_feed
 WHERE {$where}
-GROUP BY stats.id_feed
+GROUP BY feed.id
 ORDER BY `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
