@@ -29,13 +29,24 @@ class AutoTTLExtension extends Minz_Extension
             'feedBeforeActualizeHook',
         ]);
         $this->registerTranslates();
+        $this->initConfig();
     }
 
-    public function loadConfig()
+    private function initConfig()
     {
+        if (!FreshRSS_Context::userConf()->hasParam('auto_ttl_max_ttl')) {
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_max_ttl', self::MAX_TTL);
+        }
+
+        if (!FreshRSS_Context::userConf()->hasParam('auto_ttl_stats_count')) {
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_stats_count', self::STATS_COUNT);
+        }
+
+        FreshRSS_Context::userConf()->save();
+
         $this->defaultTTL = FreshRSS_Context::userConf()->attributeInt('ttl_default');
-        $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl') ?? self::MAX_TTL;
-        $this->statsCount = FreshRSS_Context::userConf()->attributeInt('auto_ttl_stats_count') ?? self::STATS_COUNT;
+        $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl');
+        $this->statsCount = FreshRSS_Context::userConf()->attributeInt('auto_ttl_stats_count');
     }
 
     /*
@@ -50,8 +61,6 @@ class AutoTTLExtension extends Minz_Extension
             FreshRSS_Context::userConf()->_attribute('auto_ttl_stats_count', Minz_Request::paramInt('auto_ttl_stats_count'));
             FreshRSS_Context::userConf()->save();
         }
-
-        $this->loadConfig();
     }
 
     public function getStats(): AutoTTLStats
@@ -65,8 +74,6 @@ class AutoTTLExtension extends Minz_Extension
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
-        $this->loadConfig();
-
         if ($feed->lastUpdate() === 0) {
             Minz_Log::debug(
                 sprintf(
