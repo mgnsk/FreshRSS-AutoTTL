@@ -19,7 +19,7 @@ class StatItem
     public function __construct(array $feed, int $maxTTL)
     {
         $this->id = (int) $feed['id'];
-        $this->name = $feed['name'];
+        $this->name = html_entity_decode($feed['name']);
         $this->lastUpdate = (int) $feed['lastUpdate'];
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
