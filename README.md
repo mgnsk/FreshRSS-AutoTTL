@@ -18,20 +18,22 @@ When a feed becomes idle (the last entry is more than 2x max TTL ago), the feed 
 
 # Testing
 
-Run `docker compose up` and open browser at `http://localhost:8080`.
+- `docker compose pull`
+- `docker compose up`
+- open browser at `http://localhost:8080`.
 
 ## MySQL credentials
 
-Host: `mysql`
-Username: `freshrss`
-Password: `freshrss`
-Database: `freshrss`
+- Host: `mysql`
+- Username: `freshrss`
+- Password: `freshrss`
+- Database: `freshrss`
 
 ## PostgreSQL credentials
 
-Host: `postgres`
-Username: `freshrss`
-Password: `freshrss`
-Database: `freshrss`
+- Host: `postgres`
+- Username: `freshrss`
+- Password: `freshrss`
+- Database: `freshrss`
 
 To reset, run `docker compose down`.
