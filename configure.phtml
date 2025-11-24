@@ -82,7 +82,7 @@ $now = time();
 				<?= htmlspecialchars($feed->name, ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
-				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'no items' ?>
+				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 			</td>
 			<td>
 				<?= $feed->isActive($now) ? 'active' : 'idle' ?>
@@ -133,7 +133,7 @@ $now = time();
 				<?= htmlspecialchars($feed->name, ENT_NOQUOTES, 'UTF-8') ?>
 			</td>
 			<td>
-				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'no items' ?>
+				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>

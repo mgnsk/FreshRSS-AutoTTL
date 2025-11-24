@@ -37,3 +37,6 @@ When a feed becomes idle (the last entry is more than 2x max TTL ago), the feed 
 - Database: `freshrss`
 
 To reset, run `docker compose down`.
+
+Run `docker compose exec freshrss php /var/www/FreshRSS/app/actualize_script.php` to run the actualization script manually.
+`
