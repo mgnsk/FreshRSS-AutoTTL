@@ -26,17 +26,6 @@ class StatItem
         $this->dateMax = (int) $feed['date_max'];
         $this->maxTTL = $maxTTL;
     }
-
-    public function isActive(int $now): bool
-    {
-        $timeSinceLastEntry = $now - $this->dateMax;
-
-        if ($timeSinceLastEntry > 2 * $this->maxTTL) {
-            return false;
-        }
-
-        return true;
-    }
 }
 
 class AutoTTLStats extends Minz_ModelPdo
@@ -67,11 +56,11 @@ class AutoTTLStats extends Minz_ModelPdo
 
     public function calcAdjustedTTL(int $avgTTL, int $dateMax): int
     {
-        $timeSinceLastEntry = time() - $dateMax;
-
         if ($this->defaultTTL > $this->maxTTL) {
             return $this->defaultTTL;
         }
+
+        $timeSinceLastEntry = time() - $dateMax;
 
         if ($avgTTL === 0 || $avgTTL > $this->maxTTL || $timeSinceLastEntry > 2 * $this->maxTTL) {
             return $this->maxTTL;
@@ -86,10 +75,10 @@ class AutoTTLStats extends Minz_ModelPdo
     {
         $sql = <<<SQL
 SELECT
-	CASE WHEN COUNT(1) > 0 THEN ((MAX(stats.date) - MIN(stats.date)) / COUNT(1)) ELSE 0 END AS `avgTTL`,
-	MAX(stats.date) AS date_max
+    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`,
+    MAX(stats.date) AS date_max
 FROM `_entry` AS stats
-WHERE id_feed = {$feedID}
+WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()}
 SQL;
 
         $stm = $this->pdo->query($sql);
@@ -98,10 +87,10 @@ SQL;
         return $this->calcAdjustedTTL((int) $res['avgTTL'], (int) $res['date_max']);
     }
 
-    public function getFeedStats(bool $autoTTL): array
+    public function getFeedStats(bool $usesAutoTTL): array
     {
         $where = '';
-        if ($autoTTL) {
+        if ($usesAutoTTL) {
             $where = 'feed.ttl = 0';
         } else {
             $where = 'feed.ttl != 0';
@@ -109,17 +98,21 @@ SQL;
 
         $sql = <<<SQL
 SELECT
-	feed.id,
-	feed.name,
-	feed.`lastUpdate`,
-	feed.ttl,
-	CASE WHEN COUNT(1) > 0 THEN ((MAX(stats.date) - MIN(stats.date)) / COUNT(1)) ELSE 0 END AS `avgTTL`,
-	MAX(stats.date) AS date_max
+    feed.id,
+    feed.name,
+    feed.`lastUpdate`,
+    feed.ttl,
+    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`,
+    MAX(stats.date) AS date_max
 FROM `_feed` AS feed
-LEFT JOIN `_entry` AS stats ON feed.id = stats.id_feed
+LEFT JOIN (
+    SELECT id_feed, date
+    FROM `_entry`
+    WHERE date > {$this->getStatsCutoff()}
+) AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY `avgTTL` ASC
+ORDER BY COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
 
@@ -132,6 +125,13 @@ SQL;
         }
 
         return $list;
+    }
+
+    private function getStatsCutoff(): int
+    {
+        // Get entry stats from last 30 days only
+        // so we don't depend on old entries and purge policy so much.
+        return time() - 30 * 24 * 60 * 60;
     }
 
     public function humanIntervalFromSeconds(int $seconds): string

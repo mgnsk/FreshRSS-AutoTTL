@@ -4,38 +4,39 @@
 		<label class="group-name" for="auto_ttl_max_ttl">Max TTL</label>
 		<div class="group-controls">
 			<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" required="required">
-				<?php foreach (
-				    [
-				        1200 => '20min',
-				        1500 => '25min',
-				        1800 => '30min',
-				        2700 => '45min',
-				        3600 => '1h',
-				        5400 => '1.5h',
-				        7200 => '2h',
-				        10800 => '3h',
-				        14400 => '4h',
-				        18800 => '5h',
-				        21600 => '6h',
-				        25200 => '7h',
-				        28800 => '8h',
-				        36000 => '10h',
-				        43200 => '12h',
-				        64800 => '18h',
-				        86400 => '1d',
-				        129600 => '1.5d',
-				        172800 => '2d',
-				        259200 => '3d',
-				        345600 => '4d',
-				        432000 => '5d',
-				        518400 => '6d',
-				        604800 => '1wk',
-				        1209600 => '2wk',
-				        1814400 => '3wk',
-				        2419200 => '4wk',
-				        2629744 => '1mo',
-				    ] as $v => $t
-				) {
+                <?php
+                    $ttlValues = [
+                        1200 => '20min',
+                        1500 => '25min',
+                        1800 => '30min',
+                        2700 => '45min',
+                        3600 => '1h',
+                        5400 => '1.5h',
+                        7200 => '2h',
+                        10800 => '3h',
+                        14400 => '4h',
+                        18800 => '5h',
+                        21600 => '6h',
+                        25200 => '7h',
+                        28800 => '8h',
+                        36000 => '10h',
+                        43200 => '12h',
+                        64800 => '18h',
+                        86400 => '1d',
+                        129600 => '1.5d',
+                        172800 => '2d',
+                        259200 => '3d',
+                        345600 => '4d',
+                        432000 => '5d',
+                        518400 => '6d',
+                        604800 => '1wk',
+                        1209600 => '2wk',
+                        1814400 => '3wk',
+                        2419200 => '4wk',
+                        2629744 => '1mo',
+                    ];
+                ?>
+				<?php foreach ($ttlValues as $v => $t) {
 				    echo '<option value="'.
 				        $v.
 				        ($this->maxTTL === $v ? '" selected="selected' : '').
@@ -63,18 +64,18 @@ $now = time();
 ?>
 
 <div class="table-wrapper">
-	<h2>Feeds using AutoTTL</h2>
+	<?php $feedsUsingAutoTTL = $this->getStats()->getFeedStats(true); ?>
+	<h2>Feeds using AutoTTL (<?php echo count($feedsUsingAutoTTL); ?>)</h2>
 	<table>
 		<thead>
 			<th>Feed</th>
-			<th>Average TTL</th>
-			<th>Status</th>
+			<th>Average TTL in last 30d</th>
 			<th>Adjusted update TTL</th>
 			<th>Last update</th>
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getFeedStats(true) as $feed) { ?>
+		<?php foreach ($feedsUsingAutoTTL as $feed) { ?>
 		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed->avgTTL, $feed->dateMax); ?>
 		<tr>
 			<td>
@@ -83,9 +84,6 @@ $now = time();
 			</td>
 			<td>
 				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
-			</td>
-			<td>
-				<?= $feed->isActive($now) ? 'active' : 'idle' ?>
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
@@ -115,7 +113,8 @@ $now = time();
 </div>
 
 <div class="table-wrapper">
-	<h2>Feeds not using AutoTTL</h2>
+	<?php $feedsNotUsingAutoTTL = $this->getStats()->getFeedStats(false); ?>
+	<h2>Feeds not using AutoTTL (<?php echo count($feedsNotUsingAutoTTL); ?>)</h2>
 	<p>To enable AutoTTL for a feed, configure the feed's "Do not automatically refresh more often than" option to "By default".</p>
 	<table>
 		<thead>
@@ -126,7 +125,7 @@ $now = time();
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getFeedStats(false) as $feed) { ?>
+		<?php foreach ($feedsNotUsingAutoTTL as $feed) { ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed->id) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
