@@ -4,38 +4,39 @@
 		<label class="group-name" for="auto_ttl_max_ttl">Max TTL</label>
 		<div class="group-controls">
 			<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" required="required">
-				<?php foreach (
-				    [
-				        1200 => '20min',
-				        1500 => '25min',
-				        1800 => '30min',
-				        2700 => '45min',
-				        3600 => '1h',
-				        5400 => '1.5h',
-				        7200 => '2h',
-				        10800 => '3h',
-				        14400 => '4h',
-				        18800 => '5h',
-				        21600 => '6h',
-				        25200 => '7h',
-				        28800 => '8h',
-				        36000 => '10h',
-				        43200 => '12h',
-				        64800 => '18h',
-				        86400 => '1d',
-				        129600 => '1.5d',
-				        172800 => '2d',
-				        259200 => '3d',
-				        345600 => '4d',
-				        432000 => '5d',
-				        518400 => '6d',
-				        604800 => '1wk',
-				        1209600 => '2wk',
-				        1814400 => '3wk',
-				        2419200 => '4wk',
-				        2629744 => '1mo',
-				    ] as $v => $t
-				) {
+                <?php
+                    $ttlValues = [
+                        1200 => '20min',
+                        1500 => '25min',
+                        1800 => '30min',
+                        2700 => '45min',
+                        3600 => '1h',
+                        5400 => '1.5h',
+                        7200 => '2h',
+                        10800 => '3h',
+                        14400 => '4h',
+                        18800 => '5h',
+                        21600 => '6h',
+                        25200 => '7h',
+                        28800 => '8h',
+                        36000 => '10h',
+                        43200 => '12h',
+                        64800 => '18h',
+                        86400 => '1d',
+                        129600 => '1.5d',
+                        172800 => '2d',
+                        259200 => '3d',
+                        345600 => '4d',
+                        432000 => '5d',
+                        518400 => '6d',
+                        604800 => '1wk',
+                        1209600 => '2wk',
+                        1814400 => '3wk',
+                        2419200 => '4wk',
+                        2629744 => '1mo',
+                    ];
+                ?>
+				<?php foreach ($ttlValues as $v => $t) {
 				    echo '<option value="'.
 				        $v.
 				        ($this->maxTTL === $v ? '" selected="selected' : '').
@@ -68,7 +69,7 @@ $now = time();
 	<table>
 		<thead>
 			<th>Feed</th>
-			<th>Average TTL</th>
+			<th>Average TTL in last 30d</th>
 			<th>Status</th>
 			<th>Adjusted update TTL</th>
 			<th>Last update</th>
