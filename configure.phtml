@@ -63,7 +63,8 @@ $now = time();
 ?>
 
 <div class="table-wrapper">
-	<h2>Feeds using AutoTTL</h2>
+	<?php $feedsUsingAutoTTL = $this->getStats()->getFeedStats(true); ?>
+	<h2>Feeds using AutoTTL (<?php echo count($feedsUsingAutoTTL); ?>)</h2>
 	<table>
 		<thead>
 			<th>Feed</th>
@@ -74,7 +75,7 @@ $now = time();
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getFeedStats(true) as $feed) { ?>
+		<?php foreach ($feedsUsingAutoTTL as $feed) { ?>
 		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed->avgTTL, $feed->dateMax); ?>
 		<tr>
 			<td>
@@ -115,7 +116,8 @@ $now = time();
 </div>
 
 <div class="table-wrapper">
-	<h2>Feeds not using AutoTTL</h2>
+	<?php $feedsNotUsingAutoTTL = $this->getStats()->getFeedStats(false); ?>
+	<h2>Feeds not using AutoTTL (<?php echo count($feedsNotUsingAutoTTL); ?>)</h2>
 	<p>To enable AutoTTL for a feed, configure the feed's "Do not automatically refresh more often than" option to "By default".</p>
 	<table>
 		<thead>
@@ -126,7 +128,7 @@ $now = time();
 			<th>Time until next update</th>
 		</thead>
 		<tbody>
-		<?php foreach ($this->getStats()->getFeedStats(false) as $feed) { ?>
+		<?php foreach ($feedsNotUsingAutoTTL as $feed) { ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed->id) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
