@@ -26,17 +26,6 @@ class StatItem
         $this->dateMax = (int) $feed['date_max'];
         $this->maxTTL = $maxTTL;
     }
-
-    public function isActive(int $now): bool
-    {
-        $timeSinceLastEntry = $now - $this->dateMax;
-
-        if ($timeSinceLastEntry > 2 * $this->maxTTL) {
-            return false;
-        }
-
-        return true;
-    }
 }
 
 class AutoTTLStats extends Minz_ModelPdo

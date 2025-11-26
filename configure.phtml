@@ -70,7 +70,6 @@ $now = time();
 		<thead>
 			<th>Feed</th>
 			<th>Average TTL in last 30d</th>
-			<th>Status</th>
 			<th>Adjusted update TTL</th>
 			<th>Last update</th>
 			<th>Time until next update</th>
@@ -85,9 +84,6 @@ $now = time();
 			</td>
 			<td>
 				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
-			</td>
-			<td>
-				<?= $feed->isActive($now) ? 'active' : 'idle' ?>
 			</td>
 			<td>
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
