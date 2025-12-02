@@ -76,7 +76,7 @@ $now = time();
 		</thead>
 		<tbody>
 		<?php foreach ($feedsUsingAutoTTL as $feed) { ?>
-		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed->avgTTL, $feed->dateMax); ?>
+		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed->avgTTL); ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed->id) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
