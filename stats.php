@@ -12,8 +12,6 @@ class StatItem
 
     public int $avgTTL;
 
-    public int $dateMax;
-
     private int $maxTTL;
 
     public function __construct(array $feed, int $maxTTL)
@@ -23,7 +21,6 @@ class StatItem
         $this->lastUpdate = (int) $feed['lastUpdate'];
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
-        $this->dateMax = (int) $feed['date_max'];
         $this->maxTTL = $maxTTL;
     }
 }
@@ -54,15 +51,13 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->statsCount = $statsCount;
     }
 
-    public function calcAdjustedTTL(int $avgTTL, int $dateMax): int
+    public function calcAdjustedTTL(int $avgTTL): int
     {
         if ($this->defaultTTL > $this->maxTTL) {
             return $this->defaultTTL;
         }
 
-        $timeSinceLastEntry = time() - $dateMax;
-
-        if ($avgTTL === 0 || $avgTTL > $this->maxTTL || $timeSinceLastEntry > 2 * $this->maxTTL) {
+        if ($avgTTL === 0 || $avgTTL > $this->maxTTL) {
             return $this->maxTTL;
         } elseif ($avgTTL < $this->defaultTTL) {
             return $this->defaultTTL;
@@ -75,8 +70,7 @@ class AutoTTLStats extends Minz_ModelPdo
     {
         $sql = <<<SQL
 SELECT
-    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`,
-    MAX(stats.date) AS date_max
+    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_entry` AS stats
 WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()}
 SQL;
@@ -84,7 +78,7 @@ SQL;
         $stm = $this->pdo->query($sql);
         $res = $stm->fetch(PDO::FETCH_NAMED);
 
-        return $this->calcAdjustedTTL((int) $res['avgTTL'], (int) $res['date_max']);
+        return $this->calcAdjustedTTL((int) $res['avgTTL']);
     }
 
     public function getFeedStats(bool $usesAutoTTL): array
@@ -102,8 +96,7 @@ SELECT
     feed.name,
     feed.`lastUpdate`,
     feed.ttl,
-    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`,
-    MAX(stats.date) AS date_max
+    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_feed` AS feed
 LEFT JOIN (
     SELECT id_feed, date
