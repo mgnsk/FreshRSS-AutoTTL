@@ -16,8 +16,7 @@ depending on the average frequency of entries.
 
 # Testing
 
-- `docker compose pull`
-- `docker compose up`
+- `docker compose up -d`
 - open browser at `http://localhost:8080`.
 
 ## MySQL credentials

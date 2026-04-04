@@ -1,0 +1,13 @@
+{
+  "name": "mgnsk/freshrss-autottl",
+  "description": "A FreshRSS extension for automatic feed refresh TTL based on the average frequency of entries.",
+  "license": "AGPL-3.0",
+  "authors": [
+    {
+      "name": "mgnsk"
+    }
+  ],
+  "require-dev": {
+    "phpunit/phpunit": "^13"
+  }
+}

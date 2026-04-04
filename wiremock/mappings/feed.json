@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/.*"
+  },
+  "response": {
+    "status": 200,
+    "bodyFileName": "{{request.pathSegments.[0]}}",
+    "transformers": ["response-template"],
+    "headers": {
+      "Content-Type": "application/atom+xml"
+    }
+  }
+}

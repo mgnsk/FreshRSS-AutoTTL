@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Feed</title>
+  <entry>
+    <title>One</title>
+    <updated>2000-01-01T00:00:00Z</updated>
+    <summary>Some text.</summary>
+  </entry>
+  <entry>
+    <title>Two</title>
+    <updated>2000-01-01T08:00:00Z</updated>
+    <summary>Some text.</summary>
+  </entry>
+  <entry>
+    <title>Three</title>
+    <updated>2000-01-01T16:00:00Z</updated>
+    <summary>Some text.</summary>
+  </entry>
+</feed>

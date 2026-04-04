@@ -36,3 +36,15 @@ services:
       FRESHRSS_ENV: development
     ports:
       - "8080:80"
+
+  composer:
+    image: composer
+    user: 1000:1000
+    volumes:
+      - .:/app
+
+  wiremock:
+    image: wiremock/wiremock:latest-alpine
+    volumes:
+      - ./wiremock:/home/wiremock
+    command: --local-response-templating

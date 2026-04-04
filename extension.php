@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__.'/stats.php';
+require_once __DIR__.'/src/AutoTTLStats.php';
 
 class AutoTTLExtension extends Minz_Extension
 {
