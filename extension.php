@@ -94,8 +94,9 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
-        $timeSinceLastUpdate = time() - $feed->lastUpdate();
-        $ttl = $this->getStats()->getAdjustedTTL($feed->id());
+        $lastUpdate = $feed->lastUpdate();
+        $timeSinceLastUpdate = time() - $lastUpdate;
+        $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastUpdate);
 
         if ($timeSinceLastUpdate < $ttl) {
             Minz_Log::debug(

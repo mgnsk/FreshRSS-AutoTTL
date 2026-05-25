@@ -91,11 +91,11 @@ class AutoTTLStats extends Minz_ModelPdo
         return $avgTTL;
     }
 
-    public function getAdjustedTTL(int $feedID): int
+    public function getAdjustedTTL(int $feedID, int $lastUpdate): int
     {
         $sql = <<<SQL
 SELECT
-    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
+    COALESCE(({$lastUpdate} - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_entry` AS stats
 WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()}
 SQL;
@@ -121,7 +121,7 @@ SELECT
     feed.name,
     feed.`lastUpdate`,
     feed.ttl,
-    COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
+    COALESCE((feed.`lastUpdate` - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_feed` AS feed
 LEFT JOIN (
     SELECT id_feed, date
@@ -130,7 +130,7 @@ LEFT JOIN (
 ) AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY COALESCE((MAX(stats.date) - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
+ORDER BY COALESCE((feed.`lastUpdate` - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
 
