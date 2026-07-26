@@ -60,6 +60,16 @@ class AutoTTLExtension extends Minz_Extension
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
+        // A direct request for one feed is a user-initiated refresh.
+        // Do not let AutoTTL suppress it.
+        if (
+            Minz_Request::controllerName() === 'feed' &&
+            Minz_Request::actionName() === 'actualize' &&
+            Minz_Request::paramInt('id') === $feed->id()
+        ) {
+            return $feed;
+        }
+
         if ($feed->lastUpdate() === 0) {
             Minz_Log::debug(
                 sprintf(
