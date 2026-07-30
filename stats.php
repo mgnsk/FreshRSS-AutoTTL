@@ -30,7 +30,7 @@ interface TimeSource
     public function time(): int;
 }
 
-class DefaultTime
+class DefaultTime implements TimeSource
 {
     public function time(): int
     {
