@@ -1,0 +1,112 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        db-type: [sqlite, mysql, postgres]
+
+    services:
+      mysql:
+        image: mysql
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: freshrss
+          MYSQL_PASSWORD: freshrss
+          MYSQL_DATABASE: freshrss
+        ports:
+          - 3306:3306
+
+      postgres:
+        image: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        env:
+          POSTGRES_USER: freshrss
+          POSTGRES_PASSWORD: freshrss
+          POSTGRES_DB: freshrss
+        ports:
+          - 5432:5432
+
+      wiremock:
+        image: wiremock/wiremock:latest-alpine
+        options: --local-response-templating
+        ports:
+          - 8080:8080
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Start services
+        run: |
+          docker compose up -d wiremock
+          if [ "${{ matrix.db-type }}" = "mysql" ]; then
+            docker compose up -d mysql
+          elif [ "${{ matrix.db-type }}" = "postgres" ]; then
+            docker compose up -d postgres
+          fi
+
+      - name: Install dependencies
+        run: docker compose run --rm composer install
+
+      - name: Generate autoloader
+        run: docker compose run --rm composer dump-autoload
+
+      - name: Start FreshRSS
+        run: docker compose up -d freshrss
+
+      - name: Wait for FreshRSS
+        run: |
+          for i in {1..30}; do
+            if docker compose exec -w /var/www/FreshRSS freshrss test -f /var/www/FreshRSS/index.php; then
+              echo "FreshRSS is ready"
+              exit 0
+            fi
+            echo "Waiting for FreshRSS... ($i/30)"
+            sleep 2
+          done
+          echo "FreshRSS failed to start"
+          exit 1
+
+      - name: Prepare FreshRSS
+        run: docker compose exec -w /var/www/FreshRSS freshrss ./cli/prepare.php
+
+      - name: Install FreshRSS
+        run: |
+          docker compose exec -w /var/www/FreshRSS freshrss \
+            ./cli/do-install.php \
+            --default-user admin \
+            --auth-type none \
+            --environment development \
+            --db-type ${{ matrix.db-type }} \
+            ${{ matrix.db-type == 'mysql' && '--db-host 127.0.0.1 --db-user freshrss --db-password freshrss --db-base freshrss' || '' }} \
+            ${{ matrix.db-type == 'postgres' && '--db-host 127.0.0.1 --db-user freshrss --db-password freshrss --db-base freshrss' || '' }}
+
+      - name: Create admin user
+        run: docker compose exec -w /var/www/FreshRSS freshrss ./cli/create-user.php --user admin
+
+      - name: Run tests
+        run: docker compose exec -w /var/www/FreshRSS/extensions/FreshRSS-AutoTTL freshrss ./vendor/bin/phpunit tests
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
