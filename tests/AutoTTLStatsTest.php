@@ -8,7 +8,6 @@ require '/var/www/FreshRSS/cli/_cli.php';
 
 FreshRSS_Context::initUser('admin');
 
-
 class MockTime implements TimeSource
 {
     private $ts;
@@ -26,20 +25,14 @@ class MockTime implements TimeSource
 
 final class AutoTTLStatsTest extends TestCase
 {
-    /* private $feedDao; */
     private $feedId;
 
     protected function setUp(): void
     {
-        /* $this->feedDao = FreshRSS_Factory::createFeedDao(); */
-
-        /* $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/feed_single_item.xml'); */
-        /* $this->feedId = $feed->id(); */
     }
 
     protected function tearDown(): void
     {
-        /* FreshRSS_feed_Controller::deleteFeed($this->feedId); */
     }
 
     public function test_default_ttl_gt_max_ttl(): void
