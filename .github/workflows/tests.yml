@@ -1,0 +1,100 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        db-type: [sqlite, mysql, postgres]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start services
+        run: |
+          docker compose up -d wiremock
+          if [ "${{ matrix.db-type }}" = "mysql" ]; then
+            docker compose up -d mysql
+          elif [ "${{ matrix.db-type }}" = "postgres" ]; then
+            docker compose up -d postgres
+          fi
+
+      - name: Install dependencies
+        run: docker compose run --rm composer install
+
+      - name: Generate autoloader
+        run: docker compose run --rm composer dump-autoload
+
+      - name: Start FreshRSS
+        run: docker compose up -d freshrss
+
+      - name: Wait for FreshRSS
+        run: |
+          for i in {1..30}; do
+            if docker compose exec -w /var/www/FreshRSS freshrss test -f /var/www/FreshRSS/index.php; then
+              echo "FreshRSS is ready"
+              exit 0
+            fi
+            echo "Waiting for FreshRSS... ($i/30)"
+            sleep 2
+          done
+          echo "FreshRSS failed to start"
+          exit 1
+
+      - name: Prepare FreshRSS
+        run: docker compose exec -w /var/www/FreshRSS freshrss ./cli/prepare.php
+
+      - name: Install FreshRSS (SQLite)
+        if: matrix.db-type == 'sqlite'
+        run: |
+          docker compose exec -w /var/www/FreshRSS freshrss \
+            ./cli/do-install.php \
+            --default-user admin \
+            --auth-type none \
+            --environment development \
+            --db-type sqlite
+
+      - name: Install FreshRSS (MySQL)
+        if: matrix.db-type == 'mysql'
+        run: |
+          docker compose exec -w /var/www/FreshRSS freshrss \
+            ./cli/do-install.php \
+            --default-user admin \
+            --auth-type none \
+            --environment development \
+            --db-type mysql \
+            --db-host mysql \
+            --db-user freshrss \
+            --db-password freshrss \
+            --db-base freshrss
+
+      - name: Install FreshRSS (PostgreSQL)
+        if: matrix.db-type == 'postgres'
+        run: |
+          docker compose exec -w /var/www/FreshRSS freshrss \
+            ./cli/do-install.php \
+            --default-user admin \
+            --auth-type none \
+            --environment development \
+            --db-type pgsql \
+            --db-host postgres \
+            --db-user freshrss \
+            --db-password freshrss \
+            --db-base freshrss
+
+      - name: Create admin user
+        run: docker compose exec -w /var/www/FreshRSS freshrss ./cli/create-user.php --user admin
+
+      - name: Run tests
+        run: docker compose exec -w /var/www/FreshRSS/extensions/FreshRSS-AutoTTL freshrss ./vendor/bin/phpunit tests
+
+      - name: Stop services
+        if: always()
+        run: docker compose down
