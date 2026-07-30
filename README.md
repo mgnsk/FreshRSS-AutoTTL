@@ -16,8 +16,9 @@ depending on the average frequency of entries.
 
 # Testing
 
-- `docker compose pull`
-- `docker compose up`
+## Manually
+
+- `docker compose up -d freshrss mysql postgres`
 - open browser at `http://localhost:8080`.
 
 ## MySQL credentials
@@ -37,3 +38,7 @@ depending on the average frequency of entries.
 To reset, run `docker compose down`.
 
 Run `docker compose exec freshrss php /var/www/FreshRSS/app/actualize_script.php` to run the actualization script manually.
+
+## Unit tests
+
+- `bash test.sh`

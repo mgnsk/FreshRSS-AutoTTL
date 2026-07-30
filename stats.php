@@ -25,6 +25,19 @@ class StatItem
     }
 }
 
+interface TimeSource
+{
+    public function time(): int;
+}
+
+class DefaultTime implements TimeSource
+{
+    public function time(): int
+    {
+        return time();
+    }
+}
+
 class AutoTTLStats extends Minz_ModelPdo
 {
     /**
@@ -42,6 +55,12 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $statsCount;
 
+
+    /**
+     * @var TimeSource
+     */
+    private $timeSource;
+
     public function __construct(int $defaultTTL, int $maxTTL, int $statsCount)
     {
         parent::__construct();
@@ -49,6 +68,12 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->defaultTTL = $defaultTTL;
         $this->maxTTL = $maxTTL;
         $this->statsCount = $statsCount;
+        $this->timeSource = new DefaultTime();
+    }
+
+    public function setTimeSource(TimeSource $timeSource): void
+    {
+        $this->timeSource = $timeSource;
     }
 
     public function calcAdjustedTTL(int $avgTTL): int
@@ -124,7 +149,7 @@ SQL;
     {
         // Get entry stats from last 30 days only
         // so we don't depend on old entries and purge policy so much.
-        return time() - 30 * 24 * 60 * 60;
+        return $this->timeSource->time() - 30 * 24 * 60 * 60;
     }
 
     public function humanIntervalFromSeconds(int $seconds): string
