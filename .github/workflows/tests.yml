@@ -19,11 +19,11 @@ jobs:
 
       - name: Start services
         run: |
-          docker compose up -d wiremock
+          docker compose up -d --wait wiremock
           if [ "${{ matrix.db-type }}" = "mysql" ]; then
-            docker compose up -d mysql
+            docker compose up -d --wait mysql
           elif [ "${{ matrix.db-type }}" = "postgres" ]; then
-            docker compose up -d postgres
+            docker compose up -d --wait postgres
           fi
 
       - name: Install dependencies
@@ -33,20 +33,7 @@ jobs:
         run: docker compose run --rm composer dump-autoload
 
       - name: Start FreshRSS
-        run: docker compose up -d freshrss
-
-      - name: Wait for FreshRSS
-        run: |
-          for i in {1..30}; do
-            if docker compose exec -w /var/www/FreshRSS freshrss test -f /var/www/FreshRSS/index.php; then
-              echo "FreshRSS is ready"
-              exit 0
-            fi
-            echo "Waiting for FreshRSS... ($i/30)"
-            sleep 2
-          done
-          echo "FreshRSS failed to start"
-          exit 1
+        run: docker compose up -d --wait freshrss
 
       - name: Prepare FreshRSS
         run: docker compose exec -w /var/www/FreshRSS freshrss ./cli/prepare.php

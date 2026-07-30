@@ -13,7 +13,7 @@ docker compose run --rm -it composer dump-autoload
 function test_sqlite {
 	trap "docker compose down" RETURN
 
-	docker compose up -d wiremock freshrss
+	docker compose up -d --wait wiremock freshrss
 
 	docker compose exec -w /var/www/FreshRSS freshrss \
 		./cli/prepare.php
@@ -22,7 +22,7 @@ function test_sqlite {
 		./cli/do-install.php \
 		--default-user admin \
 		--auth-type none \
-		-- environment development \
+		--environment development \
 		--db-type sqlite
 
 	docker compose exec -w /var/www/FreshRSS freshrss \
@@ -36,7 +36,7 @@ function test_sqlite {
 function test_mysql {
 	trap "docker compose down" RETURN
 
-	docker compose up -d mysql wiremock freshrss
+	docker compose up -d --wait mysql wiremock freshrss
 
 	docker compose exec -w /var/www/FreshRSS freshrss \
 		./cli/prepare.php
@@ -45,7 +45,7 @@ function test_mysql {
 		./cli/do-install.php \
 		--default-user admin \
 		--auth-type none \
-		-- environment development \
+		--environment development \
 		--db-type mysql \
 		--db-host mysql \
 		--db-user freshrss \
@@ -63,7 +63,7 @@ function test_mysql {
 function test_postgres {
 	trap "docker compose down" RETURN
 
-	docker compose up -d postgres wiremock freshrss
+	docker compose up -d --wait postgres wiremock freshrss
 
 	docker compose exec -w /var/www/FreshRSS freshrss \
 		./cli/prepare.php
@@ -72,7 +72,7 @@ function test_postgres {
 		./cli/do-install.php \
 		--default-user admin \
 		--auth-type none \
-		-- environment development \
+		--environment development \
 		--db-type pgsql \
 		--db-host postgres \
 		--db-user freshrss \
