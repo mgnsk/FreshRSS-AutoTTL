@@ -10,6 +10,11 @@ services:
       MYSQL_DATABASE: freshrss
     tmpfs:
       - /var/lib/mysql:uid=999,gid=999
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
 
   postgres:
     image: postgres
@@ -19,6 +24,11 @@ services:
       POSTGRES_DB: freshrss
     tmpfs:
       - /var/lib/postgresql:uid=999,gid=999
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U freshrss"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
 
   freshrss:
     image: freshrss/freshrss:latest
@@ -36,6 +46,11 @@ services:
       FRESHRSS_ENV: development
     ports:
       - "8080:80"
+    healthcheck:
+      test: cli/health.php
+      interval: 1s
+      timeout: 5s
+      retries: 10
 
   composer:
     image: composer
@@ -48,3 +63,8 @@ services:
     volumes:
       - ./wiremock:/home/wiremock
     command: --local-response-templating
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/__admin/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
