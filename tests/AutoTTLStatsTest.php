@@ -98,10 +98,43 @@ final class AutoTTLStatsTest extends TestCase
 
             $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id());
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
 
             // (16:00 - 00:00) / 3 = 57600 seconds / 3 = 19200 seconds
             $this->assertSame(19200, $adjustedTTL);
+        } finally {
+            FreshRSS_feed_Controller::deleteFeed($feed->id());
+        }
+    }
+
+    public function test_get_avg_two_close(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $statsCount = 100;
+
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+            $stats->setTimeSource(new MockTime(strtotime("2000-01-04T00:00:00Z")));
+
+            // Two updates in a row when we checked implies frequent updates.
+            // (00:02 - 00:00) / 2 = 2 seconds / 2 = 1 seconds < $default
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T00:00:02Z"));
+            $this->assertSame($defaultTTL, $adjustedTTL);
+
+            // Two updates in a row, but hours ago, implies moderate updates.
+            // (16:00 - 00:00) / 2 = 57600 seconds / 2 = 28800 seconds
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
+            $this->assertSame(28800, $adjustedTTL);
+
+            // Two updates in a row, but days ago, implies slow updates.
+            // 2 days > 1 day $maxTTL
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-03T00:00:00Z"));
+            $this->assertSame($maxTTL, $adjustedTTL);
+
+
         } finally {
             FreshRSS_feed_Controller::deleteFeed($feed->id());
         }
