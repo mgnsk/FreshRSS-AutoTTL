@@ -39,9 +39,8 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 3599;
-        $statsCount = 100;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         // defaultTTL returned.
@@ -52,9 +51,8 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 86400;
-        $statsCount = 100;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL(0);
 
         // maxTTL returned.
@@ -65,9 +63,8 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 86400;
-        $statsCount = 100;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL($maxTTL + 1);
 
         // maxTTL returned.
@@ -78,9 +75,8 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 86400;
-        $statsCount = 100;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL - 1);
 
         // defaultTTL returned.
@@ -91,12 +87,11 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 86400;
-        $statsCount = 100;
 
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
 
@@ -111,12 +106,11 @@ final class AutoTTLStatsTest extends TestCase
     {
         $defaultTTL = 3600;
         $maxTTL = 86400;
-        $statsCount = 100;
 
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, $statsCount);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-04T00:00:00Z")));
 
             // Two updates in a row when we checked implies frequent updates.
