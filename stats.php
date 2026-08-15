@@ -8,6 +8,12 @@ class StatItem
 
     public int $lastUpdate;
 
+    public int $lastError;
+
+    public int $lastAttempt;
+
+    public int $errorJitter;
+
     public int $ttl;
 
     public int $avgTTL;
@@ -19,6 +25,9 @@ class StatItem
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
         $this->lastUpdate = (int) $feed['lastUpdate'];
+        $this->lastError = (int) ($feed['error'] ?? 0);
+        $this->lastAttempt = max($this->lastUpdate, $this->lastError);
+        $this->errorJitter = AutoTTLExtension::calcErrorJitter($this->id, $this->lastUpdate, $this->lastError);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
         $this->maxTTL = $maxTTL;
@@ -120,6 +129,7 @@ SELECT
     feed.id,
     feed.name,
     feed.`lastUpdate`,
+    feed.error,
     feed.ttl,
     COALESCE((feed.`lastUpdate` - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_feed` AS feed

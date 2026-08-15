@@ -89,20 +89,23 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : ($feed->lastError > 0 ? 'error ' . $this->getStats()->humanIntervalFromSeconds($now - $feed->lastError) . ' ago' : 'never') ?>
 			</td>
 			<td>
 				<?php
-                    if ($feed->lastUpdate > 0) {
-                        $timeUntil = $feed->lastUpdate + $adjustedTTL - $now;
+                    $lastAttempt = $feed->lastAttempt;
+                    if ($lastAttempt > 0) {
+                        $effectiveTTL = $adjustedTTL + $feed->errorJitter;
+                        $timeUntil = $lastAttempt + $effectiveTTL - $now;
+                        $jitterText = $feed->errorJitter > 0 ? ', +' . $this->getStats()->humanIntervalFromSeconds($feed->errorJitter) . ' jitter' : '';
                         if ($timeUntil > 0) {
                             $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-                            echo $interval;
+                            echo $feed->lastError > $feed->lastUpdate ? $interval . ' (in error' . $jitterText . ')' : $interval;
                         } else {
-                            echo 'pending';
+                            echo $feed->lastError > $feed->lastUpdate ? 'pending (in error' . $jitterText . ')' : 'pending';
                         }
                     } else {
-                        echo 'never updated';
+                        echo 'never attempted';
                     }
 		    ?>
 			</td>
@@ -138,21 +141,24 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
+				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : ($feed->lastError > 0 ? 'error ' . $this->getStats()->humanIntervalFromSeconds($now - $feed->lastError) . ' ago' : 'never') ?>
 			</td>
 			<td>
 				<?php
-		        if ($feed->lastUpdate > 0) {
-		            $timeUntil = $feed->lastUpdate + $feed->ttl - $now;
-		            if ($timeUntil > 0) {
-		                $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-		                echo $interval;
-		            } else {
-		                echo 'pending';
-		            }
-		        } else {
-		            echo 'never updated';
-		        }
+                    $lastAttempt = $feed->lastAttempt;
+                    if ($lastAttempt > 0) {
+                        $effectiveTTL = $feed->ttl + $feed->errorJitter;
+                        $timeUntil = $lastAttempt + $effectiveTTL - $now;
+                        $jitterText = $feed->errorJitter > 0 ? ', +' . $this->getStats()->humanIntervalFromSeconds($feed->errorJitter) . ' jitter' : '';
+                        if ($timeUntil > 0) {
+                            $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
+                            echo $feed->lastError > $feed->lastUpdate ? $interval . ' (in error' . $jitterText . ')' : $interval;
+                        } else {
+                            echo $feed->lastError > $feed->lastUpdate ? 'pending (in error' . $jitterText . ')' : 'pending';
+                        }
+                    } else {
+                        echo 'never attempted';
+                    }
 		    ?>
 			</td>
 		</tr>
