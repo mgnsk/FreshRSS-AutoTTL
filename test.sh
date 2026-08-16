@@ -7,7 +7,7 @@ GROUP_ID=$(id -g)
 export USER_ID
 export GROUP_ID
 
-docker compose run --rm -it composer install --ignore-platform-req=ext-gmp --ignore-platform-req=ext-intl
+docker compose run --rm -it composer install --ignore-platform-reqs
 docker compose run --rm -it composer dump-autoload
 
 function test_sqlite {
