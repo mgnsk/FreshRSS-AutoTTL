@@ -9,17 +9,17 @@ class AutoTTLExtension extends Minz_Extension
 
     private const STATS_COUNT = 100;
 
+    // Not currently user-configurable, but shaped as if it could be:
+    // threaded through as a value rather than hardcoded where it's used.
     private const ERROR_JITTER = 60 * 60; // 1 hour max jitter for errored feeds
-
-    // FreshRSS_Feed::lastError() legacy-returns 1 (not a real timestamp) for feeds
-    // whose error state predates the _feed.error column becoming a BIGINT timestamp.
-    public const LEGACY_ERROR_SENTINEL = 1;
 
     public int $defaultTTL;
 
     public int $maxTTL;
 
     public int $statsCount;
+
+    public int $errorJitterMax;
 
     /**
      * @var AutoTTLStats
@@ -39,6 +39,7 @@ class AutoTTLExtension extends Minz_Extension
         $this->defaultTTL = FreshRSS_Context::userConf()->attributeInt('ttl_default') ?? FreshRSS_Feed::TTL_DEFAULT;
         $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl') ?? self::MAX_TTL;
         $this->statsCount = FreshRSS_Context::userConf()->attributeInt('auto_ttl_stats_count') ?? self::STATS_COUNT;
+        $this->errorJitterMax = self::ERROR_JITTER;
     }
 
     /*
@@ -58,47 +59,15 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->errorJitterMax);
         }
 
         return $this->stats;
     }
 
-    public static function calcErrorJitter(int $feedId, int $lastUpdate, int $lastError): int
-    {
-        if (!self::calcIsErroring($lastUpdate, $lastError) || self::ERROR_JITTER <= 0) {
-            return 0;
-        }
-
-        return (int) (abs(crc32($feedId . '_' . $lastError)) % self::ERROR_JITTER);
-    }
-
     public function getErrorJitter(FreshRSS_Feed $feed): int
     {
-        return self::calcErrorJitter($feed->id(), $feed->lastUpdate(), $feed->lastError());
-    }
-
-    /*
-     * Whether the feed's most recent fetch attempt ended in an error.
-     * Guards against the legacy sentinel value of lastError(), which is not comparable to lastUpdate().
-     */
-    public static function calcIsErroring(int $lastUpdate, int $lastError): bool
-    {
-        return $lastError === self::LEGACY_ERROR_SENTINEL || $lastError > $lastUpdate;
-    }
-
-    /*
-     * Timestamp of the feed's most recent fetch attempt (success or error).
-     * Falls back to lastUpdate() when lastError() is the legacy sentinel, since
-     * its real timestamp is unknown.
-     */
-    public static function calcLastAttempt(int $lastUpdate, int $lastError): int
-    {
-        if ($lastError <= self::LEGACY_ERROR_SENTINEL) {
-            return $lastUpdate;
-        }
-
-        return max($lastUpdate, $lastError);
+        return StatItem::calcErrorJitter($feed->id(), $feed->lastUpdate(), $feed->lastError(), $this->errorJitterMax);
     }
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
@@ -113,7 +82,7 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
-        $lastAttempt = self::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
+        $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         if ($lastAttempt === 0) {
             Minz_Log::debug(
                 sprintf(

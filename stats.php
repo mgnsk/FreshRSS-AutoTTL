@@ -2,6 +2,10 @@
 
 class StatItem
 {
+    // FreshRSS_Feed::lastError() legacy-returns 1 (not a real timestamp) for feeds
+    // whose error state predates the _feed.error column becoming a BIGINT timestamp.
+    public const LEGACY_ERROR_SENTINEL = 1;
+
     public int $id;
 
     public string $name;
@@ -20,20 +24,49 @@ class StatItem
 
     public int $avgTTL;
 
-    private int $maxTTL;
-
-    public function __construct(array $feed, int $maxTTL)
+    public function __construct(array $feed, int $errorJitterMax)
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
         $this->lastUpdate = (int) $feed['lastUpdate'];
         $this->lastError = (int) ($feed['error'] ?? 0);
-        $this->lastAttempt = AutoTTLExtension::calcLastAttempt($this->lastUpdate, $this->lastError);
-        $this->isErroring = AutoTTLExtension::calcIsErroring($this->lastUpdate, $this->lastError);
-        $this->errorJitter = AutoTTLExtension::calcErrorJitter($this->id, $this->lastUpdate, $this->lastError);
+        $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
+        $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
+        $this->errorJitter = self::calcErrorJitter($this->id, $this->lastUpdate, $this->lastError, $errorJitterMax);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
-        $this->maxTTL = $maxTTL;
+    }
+
+    public static function calcErrorJitter(int $feedId, int $lastUpdate, int $lastError, int $errorJitterMax): int
+    {
+        if (!self::calcIsErroring($lastUpdate, $lastError) || $errorJitterMax <= 0) {
+            return 0;
+        }
+
+        return (int) (abs(crc32($feedId . '_' . $lastError)) % $errorJitterMax);
+    }
+
+    /*
+     * Whether the feed's most recent fetch attempt ended in an error.
+     * Guards against the legacy sentinel value of lastError(), which is not comparable to lastUpdate().
+     */
+    public static function calcIsErroring(int $lastUpdate, int $lastError): bool
+    {
+        return $lastError === self::LEGACY_ERROR_SENTINEL || $lastError > $lastUpdate;
+    }
+
+    /*
+     * Timestamp of the feed's most recent fetch attempt (success or error).
+     * Falls back to lastUpdate() when lastError() is the legacy sentinel, since
+     * its real timestamp is unknown.
+     */
+    public static function calcLastAttempt(int $lastUpdate, int $lastError): int
+    {
+        if ($lastError <= self::LEGACY_ERROR_SENTINEL) {
+            return $lastUpdate;
+        }
+
+        return max($lastUpdate, $lastError);
     }
 }
 
@@ -67,19 +100,24 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $statsCount;
 
+    /**
+     * @var int
+     */
+    private $errorJitterMax;
 
     /**
      * @var TimeSource
      */
     private $timeSource;
 
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount)
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $errorJitterMax)
     {
         parent::__construct();
 
         $this->defaultTTL = $defaultTTL;
         $this->maxTTL = $maxTTL;
         $this->statsCount = $statsCount;
+        $this->errorJitterMax = $errorJitterMax;
         $this->timeSource = new DefaultTime();
     }
 
@@ -127,7 +165,7 @@ SQL;
             $where = 'feed.ttl != 0';
         }
 
-        // Mirrors AutoTTLExtension::calcLastAttempt(): the legacy error sentinel (1) is
+        // Mirrors StatItem::calcLastAttempt(): the legacy error sentinel (1) is
         // not a real timestamp, so it's excluded from the "last attempt" anchor used below.
         // This must match the anchor the throttle engine uses (feedBeforeActualizeHook),
         // otherwise the displayed adjusted TTL diverges from the one actually applied.
@@ -149,7 +187,7 @@ LEFT JOIN (
 ) AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
+ORDER BY `avgTTL` = 0, `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
 
@@ -158,7 +196,7 @@ SQL;
 
         $list = [];
         foreach ($res as $feed) {
-            $list[] = new StatItem($feed, $this->maxTTL);
+            $list[] = new StatItem($feed, $this->errorJitterMax);
         }
 
         return $list;
@@ -167,13 +205,13 @@ SQL;
     public function formatLastAttempt(StatItem $feed, int $now): string
     {
         if ($feed->isErroring) {
-            return $feed->lastError > AutoTTLExtension::LEGACY_ERROR_SENTINEL
-                ? 'error ' . $this->humanIntervalFromSeconds($now - $feed->lastError) . ' ago'
+            return $feed->lastError > StatItem::LEGACY_ERROR_SENTINEL
+                ? 'error ' . self::humanIntervalFromSeconds($now - $feed->lastError) . ' ago'
                 : 'error (time unknown)';
         }
 
         return $feed->lastUpdate > 0
-            ? $this->humanIntervalFromSeconds($now - $feed->lastUpdate) . ' ago'
+            ? self::humanIntervalFromSeconds($now - $feed->lastUpdate) . ' ago'
             : 'never';
     }
 
@@ -188,11 +226,11 @@ SQL;
 
         $suffix = '';
         if ($feed->isErroring) {
-            $jitterText = $jitter > 0 ? ', +' . $this->humanIntervalFromSeconds($jitter) . ' jitter' : '';
+            $jitterText = $jitter > 0 ? ', +' . self::humanIntervalFromSeconds($jitter) . ' jitter' : '';
             $suffix = ' (in error' . $jitterText . ')';
         }
 
-        return ($timeUntil > 0 ? $this->humanIntervalFromSeconds($timeUntil) : 'pending') . $suffix;
+        return ($timeUntil > 0 ? self::humanIntervalFromSeconds($timeUntil) : 'pending') . $suffix;
     }
 
     private function getStatsCutoff(): int
@@ -202,7 +240,7 @@ SQL;
         return $this->timeSource->time() - 30 * 24 * 60 * 60;
     }
 
-    public function humanIntervalFromSeconds(int $seconds): string
+    public static function humanIntervalFromSeconds(int $seconds): string
     {
         $from = new \DateTime('@0');
         $to = new \DateTime("@$seconds");

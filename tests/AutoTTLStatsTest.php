@@ -40,7 +40,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 3599;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         // defaultTTL returned.
@@ -52,7 +52,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
         $adjustedTTL = $stats->calcAdjustedTTL(0);
 
         // maxTTL returned.
@@ -64,7 +64,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
         $adjustedTTL = $stats->calcAdjustedTTL($maxTTL + 1);
 
         // maxTTL returned.
@@ -76,7 +76,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
         $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL - 1);
 
         // defaultTTL returned.
@@ -91,7 +91,7 @@ final class AutoTTLStatsTest extends TestCase
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
 
@@ -110,7 +110,7 @@ final class AutoTTLStatsTest extends TestCase
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-04T00:00:00Z")));
 
             // Two updates in a row when we checked implies frequent updates.
@@ -143,7 +143,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 500,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], 86400);
+        ], 3600);
 
         $this->assertSame(1000, $item1->lastUpdate);
         $this->assertSame(500, $item1->lastError);
@@ -157,7 +157,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 2000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], 86400);
+        ], 3600);
 
         $this->assertSame(1000, $item2->lastUpdate);
         $this->assertSame(2000, $item2->lastError);
@@ -245,7 +245,7 @@ final class AutoTTLStatsTest extends TestCase
             // instead of just $feed1/$feed2, which would make the test flaky.
             $jitters = [];
             for ($syntheticFeedId = 1; $syntheticFeedId <= 20; $syntheticFeedId++) {
-                $jitters[] = AutoTTLExtension::calcErrorJitter($syntheticFeedId, $now - 86400, $errorTime);
+                $jitters[] = StatItem::calcErrorJitter($syntheticFeedId, $now - 86400, $errorTime, 3600);
             }
             $this->assertGreaterThan(1, count(array_unique($jitters)), 'Expected jitter to vary across feeds');
 
