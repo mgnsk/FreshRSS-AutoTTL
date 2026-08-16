@@ -38,7 +38,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 3599;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         // defaultTTL returned.
@@ -50,7 +50,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL(0);
 
         // maxTTL returned.
@@ -62,7 +62,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL($maxTTL + 1);
 
         // maxTTL returned.
@@ -74,7 +74,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
         $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL - 1);
 
         // defaultTTL returned.
@@ -90,7 +90,7 @@ final class AutoTTLStatsTest extends TestCase
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
 
@@ -112,7 +112,7 @@ final class AutoTTLStatsTest extends TestCase
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 3600);
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
             $stats->setTimeSource(new MockTime(strtotime("2000-01-04T00:00:00Z")));
 
             // Two updates in a row when we checked implies frequent updates.
@@ -140,6 +140,9 @@ final class AutoTTLStatsTest extends TestCase
 
     public function test_stat_item_last_attempt(): void
     {
+        $baseTTL = 3600;
+        $maxTTL = 86400;
+
         $item1 = new StatItem([
             'id' => 1,
             'name' => 'Test Feed',
@@ -147,13 +150,16 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 500,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], 3600);
+        ], $baseTTL, $maxTTL);
 
         $this->assertSame(1000, $item1->lastUpdate);
         $this->assertSame(500, $item1->lastError);
         $this->assertSame(1000, $item1->lastAttempt);
+        $this->assertFalse($item1->isErroring);
+        $this->assertSame($baseTTL, $item1->backoffTTL);
         $this->assertSame(0, $item1->errorJitter);
 
+        // errorAge (1000s) below baseTTL (3600s): backoff stays at baseTTL.
         $item2 = new StatItem([
             'id' => 2,
             'name' => 'Errored Feed',
@@ -161,13 +167,83 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 2000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], 3600);
+        ], $baseTTL, $maxTTL);
 
         $this->assertSame(1000, $item2->lastUpdate);
         $this->assertSame(2000, $item2->lastError);
         $this->assertSame(2000, $item2->lastAttempt);
+        $this->assertTrue($item2->isErroring);
+        $this->assertSame($baseTTL, $item2->backoffTTL);
         $this->assertGreaterThanOrEqual(0, $item2->errorJitter);
-        $this->assertLessThan(60 * 60, $item2->errorJitter);
+        $this->assertLessThan((int) ($baseTTL * StatItem::JITTER_FRACTION), $item2->errorJitter);
+
+        // errorAge (7200s) above baseTTL: backoff grows to match errorAge.
+        $item3 = new StatItem([
+            'id' => 3,
+            'name' => 'Long Errored Feed',
+            'lastUpdate' => 1000,
+            'error' => 8200,
+            'ttl' => 0,
+            'avgTTL' => 3600,
+        ], $baseTTL, $maxTTL);
+
+        $this->assertSame(7200, $item3->backoffTTL);
+        $this->assertLessThan((int) (7200 * StatItem::JITTER_FRACTION), $item3->errorJitter);
+
+        // errorAge far exceeding maxTTL: backoff clamps at maxTTL.
+        $item4 = new StatItem([
+            'id' => 4,
+            'name' => 'Deeply Errored Feed',
+            'lastUpdate' => 1000,
+            'error' => 1000 + 200000,
+            'ttl' => 0,
+            'avgTTL' => 3600,
+        ], $baseTTL, $maxTTL);
+
+        $this->assertSame($maxTTL, $item4->backoffTTL);
+    }
+
+    public function test_calc_backoff_ttl_grows_and_clamps(): void
+    {
+        $baseTTL = 3600;
+        $maxTTL = 86400;
+        $lastUpdate = 0;
+
+        // Not erroring: backoff is always just baseTTL.
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100000, false, $maxTTL));
+
+        // errorAge below baseTTL: clamped up to baseTTL.
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 1800, true, $maxTTL));
+
+        // Simulate consecutive throttled retries: each retry only happens after
+        // waiting the previous backoffTTL, so errorAge grows by that amount each
+        // pass. Once past baseTTL, this produces roughly-doubling backoff.
+        $errorAge = $baseTTL;
+        $backoffs = [];
+        for ($i = 0; $i < 5; $i++) {
+            $backoff = StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $errorAge, true, $maxTTL);
+            $backoffs[] = $backoff;
+            $errorAge += $backoff;
+        }
+
+        $this->assertSame([3600, 7200, 14400, 28800, 57600], $backoffs);
+
+        // Clamped at maxTTL however large errorAge grows.
+        $this->assertSame($maxTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL));
+    }
+
+    public function test_calc_backoff_ttl_never_below_base_ttl_when_base_exceeds_max(): void
+    {
+        // Mirrors calcAdjustedTTL's defaultTTL > maxTTL escape hatch (see
+        // test_default_ttl_gt_max_ttl): baseTTL can legitimately exceed maxTTL.
+        // An errored feed must still never be checked more eagerly than a
+        // healthy one, so backoff must not collapse down to maxTTL here.
+        $baseTTL = 7200;
+        $maxTTL = 3600;
+        $lastUpdate = 0;
+
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100, true, $maxTTL));
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $baseTTL * 10, true, $maxTTL));
     }
 
     public function test_feed_before_actualize_throttles_recent_error(): void
@@ -227,11 +303,14 @@ final class AutoTTLStatsTest extends TestCase
             $feedDAO->updateLastUpdate($feed1->id(), $now - 86400);
             $feedDAO->updateLastUpdate($feed2->id(), $now - 86400);
 
+            $baseTTL = 3600;
+
             // 1. Non-errored feed should return 0 jitter
             $feed1Clean = $feedDAO->searchById($feed1->id());
-            $this->assertSame(0, $ext->getErrorJitter($feed1Clean));
+            $backoffClean = $ext->getBackoffTTL($feed1Clean, $baseTTL);
+            $this->assertSame(0, $ext->getErrorJitter($feed1Clean, $backoffClean));
 
-            // 2. Errored feeds should return non-negative jitter within 0..3599 seconds (1 hour)
+            // 2. Errored feeds should return non-negative jitter within [0, 25% of backoffTTL)
             $errorTime = $now - 600;
             $feedDAO->updateLastError($feed1->id(), $errorTime);
             $feedDAO->updateLastError($feed2->id(), $errorTime);
@@ -239,28 +318,31 @@ final class AutoTTLStatsTest extends TestCase
             $feed1Error = $feedDAO->searchById($feed1->id());
             $feed2Error = $feedDAO->searchById($feed2->id());
 
-            $jitter1 = $ext->getErrorJitter($feed1Error);
-            $jitter2 = $ext->getErrorJitter($feed2Error);
+            $backoff1 = $ext->getBackoffTTL($feed1Error, $baseTTL);
+            $backoff2 = $ext->getBackoffTTL($feed2Error, $baseTTL);
+
+            $jitter1 = $ext->getErrorJitter($feed1Error, $backoff1);
+            $jitter2 = $ext->getErrorJitter($feed2Error, $backoff2);
 
             $this->assertGreaterThanOrEqual(0, $jitter1);
-            $this->assertLessThan(60 * 60, $jitter1);
+            $this->assertLessThan((int) ($backoff1 * StatItem::JITTER_FRACTION), $jitter1);
 
             $this->assertGreaterThanOrEqual(0, $jitter2);
-            $this->assertLessThan(60 * 60, $jitter2);
+            $this->assertLessThan((int) ($backoff2 * StatItem::JITTER_FRACTION), $jitter2);
 
             // Jitter is per-feed, so feeds erroring at the same instant should generally be
-            // staggered. Any two specific feed IDs have a 1-in-3600 chance of colliding on the
+            // staggered. Any two specific feed IDs have a low chance of colliding on the
             // same jitter bucket, so assert the stagger property across many synthetic feed IDs
             // instead of just $feed1/$feed2, which would make the test flaky.
             $jitters = [];
             for ($syntheticFeedId = 1; $syntheticFeedId <= 20; $syntheticFeedId++) {
-                $jitters[] = StatItem::calcErrorJitter($syntheticFeedId, $now - 86400, $errorTime, 3600);
+                $jitters[] = StatItem::calcErrorJitter($syntheticFeedId, $baseTTL, $errorTime, true);
             }
             $this->assertGreaterThan(1, count(array_unique($jitters)), 'Expected jitter to vary across feeds');
 
             // 3. Jitter calculation should be deterministic for the same feed and error timestamp
-            $this->assertSame($jitter1, $ext->getErrorJitter($feed1Error));
-            $this->assertSame($jitter2, $ext->getErrorJitter($feed2Error));
+            $this->assertSame($jitter1, $ext->getErrorJitter($feed1Error, $backoff1));
+            $this->assertSame($jitter2, $ext->getErrorJitter($feed2Error, $backoff2));
         } finally {
             if ($feed1 !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed1->id());

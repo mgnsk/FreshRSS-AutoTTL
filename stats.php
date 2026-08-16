@@ -6,6 +6,10 @@ class StatItem
     // whose error state predates the _feed.error column becoming a BIGINT timestamp.
     public const LEGACY_ERROR_SENTINEL = 1;
 
+    // Jitter is a fraction of backoffTTL rather than an absolute value, so it scales
+    // with the wait instead of dwarfing short TTLs or being negligible on long ones.
+    public const JITTER_FRACTION = 0.25;
+
     public int $id;
 
     public string $name;
@@ -18,13 +22,15 @@ class StatItem
 
     public bool $isErroring;
 
+    public int $backoffTTL;
+
     public int $errorJitter;
 
     public int $ttl;
 
     public int $avgTTL;
 
-    public function __construct(array $feed, int $errorJitterMax)
+    public function __construct(array $feed, int $baseTTL, int $maxTTL)
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
@@ -32,18 +38,24 @@ class StatItem
         $this->lastError = (int) ($feed['error'] ?? 0);
         $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
         $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
-        $this->errorJitter = self::calcErrorJitter($this->id, $this->lastUpdate, $this->lastError, $errorJitterMax);
+        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->lastUpdate, $this->lastAttempt, $this->isErroring, $maxTTL);
+        $this->errorJitter = self::calcErrorJitter($this->id, $this->backoffTTL, $this->lastError, $this->isErroring);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
     }
 
-    public static function calcErrorJitter(int $feedId, int $lastUpdate, int $lastError, int $errorJitterMax): int
+    public static function calcErrorJitter(int $feedId, int $backoffTTL, int $lastError, bool $isErroring): int
     {
-        if (!self::calcIsErroring($lastUpdate, $lastError) || $errorJitterMax <= 0) {
+        if (!$isErroring) {
             return 0;
         }
 
-        return (int) (abs(crc32($feedId . '_' . $lastError)) % $errorJitterMax);
+        $jitterMax = (int) ($backoffTTL * self::JITTER_FRACTION);
+        if ($jitterMax <= 0) {
+            return 0;
+        }
+
+        return (int) (abs(crc32($feedId . '_' . $lastError)) % $jitterMax);
     }
 
     /*
@@ -67,6 +79,28 @@ class StatItem
         }
 
         return max($lastUpdate, $lastError);
+    }
+
+    /*
+     * TTL to apply to a feed that keeps erroring, growing with how long it's been
+     * failing (lastAttempt - lastUpdate). Since each retry only happens after
+     * waiting backoffTTL, errorAge roughly doubles each pass once it exceeds
+     * baseTTL, producing exponential backoff bounded by maxTTL without needing
+     * to persist an attempt counter.
+     *
+     * Never returns less than baseTTL, even if baseTTL itself exceeds maxTTL
+     * (calcAdjustedTTL's defaultTTL > maxTTL escape hatch) - an errored feed
+     * must never be checked more eagerly than a healthy one.
+     */
+    public static function calcBackoffTTL(int $baseTTL, int $lastUpdate, int $lastAttempt, bool $isErroring, int $maxTTL): int
+    {
+        if (!$isErroring) {
+            return $baseTTL;
+        }
+
+        $errorAge = $lastAttempt - $lastUpdate;
+
+        return max($baseTTL, min($maxTTL, max($baseTTL, $errorAge)));
     }
 }
 
@@ -101,23 +135,17 @@ class AutoTTLStats extends Minz_ModelPdo
     private $statsCount;
 
     /**
-     * @var int
-     */
-    private $errorJitterMax;
-
-    /**
      * @var TimeSource
      */
     private $timeSource;
 
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $errorJitterMax)
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount)
     {
         parent::__construct();
 
         $this->defaultTTL = $defaultTTL;
         $this->maxTTL = $maxTTL;
         $this->statsCount = $statsCount;
-        $this->errorJitterMax = $errorJitterMax;
         $this->timeSource = new DefaultTime();
     }
 
@@ -196,7 +224,8 @@ SQL;
 
         $list = [];
         foreach ($res as $feed) {
-            $list[] = new StatItem($feed, $this->errorJitterMax);
+            $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL']);
+            $list[] = new StatItem($feed, $baseTTL, $this->maxTTL);
         }
 
         return $list;

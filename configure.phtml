@@ -76,7 +76,6 @@ $now = time();
 		</thead>
 		<tbody>
 		<?php foreach ($feedsUsingAutoTTL as $feed) { ?>
-		<?php $adjustedTTL = $this->getStats()->calcAdjustedTTL($feed->avgTTL); ?>
 		<tr>
 			<td>
 				<a class="configure" target="_blank" href="<?= _url('subscription', 'feed', 'id', $feed->id) ?>" title="<?= _t('gen.action.manage') ?>"><?= _i('configure') ?></a>
@@ -86,13 +85,13 @@ $now = time();
 				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 			</td>
 			<td>
-				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
+				<?= $this->getStats()->humanIntervalFromSeconds($feed->backoffTTL) ?>
 			</td>
 			<td>
 				<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
 			</td>
 			<td>
-				<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $adjustedTTL, $now, true) ?>
+				<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $feed->backoffTTL, $now, true) ?>
 			</td>
 		</tr>
 		<?php } ?>
