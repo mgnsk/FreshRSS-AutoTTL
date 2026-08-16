@@ -156,6 +156,7 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame(500, $item1->lastError);
         $this->assertSame(1000, $item1->lastAttempt);
         $this->assertFalse($item1->isErroring);
+        $this->assertSame($baseTTL, $item1->baseTTL);
         $this->assertSame($baseTTL, $item1->backoffTTL);
         $this->assertSame(0, $item1->errorJitter);
 
@@ -173,6 +174,7 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame(2000, $item2->lastError);
         $this->assertSame(2000, $item2->lastAttempt);
         $this->assertTrue($item2->isErroring);
+        $this->assertSame($baseTTL, $item2->baseTTL);
         $this->assertSame($baseTTL, $item2->backoffTTL);
         $this->assertGreaterThanOrEqual(0, $item2->errorJitter);
         $this->assertLessThan((int) ($baseTTL * StatItem::JITTER_FRACTION), $item2->errorJitter);
@@ -187,6 +189,7 @@ final class AutoTTLStatsTest extends TestCase
             'avgTTL' => 3600,
         ], $baseTTL, $maxTTL);
 
+        $this->assertSame($baseTTL, $item3->baseTTL);
         $this->assertSame(7200, $item3->backoffTTL);
         $this->assertLessThan((int) (7200 * StatItem::JITTER_FRACTION), $item3->errorJitter);
 

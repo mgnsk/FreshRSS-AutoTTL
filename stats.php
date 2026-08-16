@@ -22,6 +22,8 @@ class StatItem
 
     public bool $isErroring;
 
+    public int $baseTTL;
+
     public int $backoffTTL;
 
     public int $errorJitter;
@@ -38,6 +40,7 @@ class StatItem
         $this->lastError = (int) ($feed['error'] ?? 0);
         $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
         $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
+        $this->baseTTL = $baseTTL;
         $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->lastUpdate, $this->lastAttempt, $this->isErroring, $maxTTL);
         $this->errorJitter = self::calcErrorJitter($this->id, $this->backoffTTL, $this->lastError, $this->isErroring);
         $this->ttl = (int) $feed['ttl'];
