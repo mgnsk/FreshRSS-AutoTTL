@@ -27,7 +27,7 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: docker docker compose run --rm composer install --ignore-platform-req=ext-gmp --ignore-platform-req=ext-intl
+        run: docker compose run --rm composer install --ignore-platform-req=ext-gmp --ignore-platform-req=ext-intl
 
       - name: Generate autoloader
         run: docker compose run --rm composer dump-autoload
