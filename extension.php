@@ -9,6 +9,12 @@ class AutoTTLExtension extends Minz_Extension
 
     private const STATS_COUNT = 100;
 
+    private const ERROR_JITTER = 60 * 60; // 1 hour max jitter for errored feeds
+
+    // FreshRSS_Feed::lastError() legacy-returns 1 (not a real timestamp) for feeds
+    // whose error state predates the _feed.error column becoming a BIGINT timestamp.
+    public const LEGACY_ERROR_SENTINEL = 1;
+
     public int $defaultTTL;
 
     public int $maxTTL;
@@ -58,6 +64,43 @@ class AutoTTLExtension extends Minz_Extension
         return $this->stats;
     }
 
+    public static function calcErrorJitter(int $feedId, int $lastUpdate, int $lastError): int
+    {
+        if (!self::calcIsErroring($lastUpdate, $lastError) || self::ERROR_JITTER <= 0) {
+            return 0;
+        }
+
+        return (int) (abs(crc32($feedId . '_' . $lastError)) % self::ERROR_JITTER);
+    }
+
+    public function getErrorJitter(FreshRSS_Feed $feed): int
+    {
+        return self::calcErrorJitter($feed->id(), $feed->lastUpdate(), $feed->lastError());
+    }
+
+    /*
+     * Whether the feed's most recent fetch attempt ended in an error.
+     * Guards against the legacy sentinel value of lastError(), which is not comparable to lastUpdate().
+     */
+    public static function calcIsErroring(int $lastUpdate, int $lastError): bool
+    {
+        return $lastError === self::LEGACY_ERROR_SENTINEL || $lastError > $lastUpdate;
+    }
+
+    /*
+     * Timestamp of the feed's most recent fetch attempt (success or error).
+     * Falls back to lastUpdate() when lastError() is the legacy sentinel, since
+     * its real timestamp is unknown.
+     */
+    public static function calcLastAttempt(int $lastUpdate, int $lastError): int
+    {
+        if ($lastError <= self::LEGACY_ERROR_SENTINEL) {
+            return $lastUpdate;
+        }
+
+        return max($lastUpdate, $lastError);
+    }
+
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
         // A direct request for one feed is a user-initiated refresh.
@@ -70,10 +113,11 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
-        if ($feed->lastUpdate() === 0) {
+        $lastAttempt = self::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
+        if ($lastAttempt === 0) {
             Minz_Log::debug(
                 sprintf(
-                    'AutoTTL: feed %d (%s) never updated, updating now',
+                    'AutoTTL: feed %d (%s) never attempted, updating now',
                     $feed->id(),
                     $feed->name(),
                 )
@@ -94,18 +138,21 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
-        $lastUpdate = $feed->lastUpdate();
-        $timeSinceLastUpdate = time() - $lastUpdate;
-        $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastUpdate);
+        $timeSinceLastAttempt = time() - $lastAttempt;
+        $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
+        $jitter = $this->getErrorJitter($feed);
+        $effectiveTTL = $ttl + $jitter;
 
-        if ($timeSinceLastUpdate < $ttl) {
+        if ($timeSinceLastAttempt < $effectiveTTL) {
             Minz_Log::debug(
                 sprintf(
-                    'AutoTTL: skip feed %d (%s, last update %s): adjusted TTL (%ds) not exceeded yet',
+                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds = %ds TTL + %ds jitter) not exceeded yet',
                     $feed->id(),
                     $feed->name(),
-                    date('r', $feed->lastUpdate()),
+                    date('r', $lastAttempt),
+                    $effectiveTTL,
                     $ttl,
+                    $jitter,
                 )
             );
 
@@ -114,10 +161,10 @@ class AutoTTLExtension extends Minz_Extension
 
         Minz_Log::debug(
             sprintf(
-                'AutoTTL: updating feed %d (%s, last update %s, adjusted TTL %ds)',
+                'AutoTTL: updating feed %d (%s, last attempt %s, adjusted TTL %ds)',
                 $feed->id(),
                 $feed->name(),
-                date('r', $feed->lastUpdate()),
+                date('r', $lastAttempt),
                 $ttl,
             )
         );

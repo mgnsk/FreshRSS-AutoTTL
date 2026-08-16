@@ -89,22 +89,10 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($adjustedTTL) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
+				<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
 			</td>
 			<td>
-				<?php
-                    if ($feed->lastUpdate > 0) {
-                        $timeUntil = $feed->lastUpdate + $adjustedTTL - $now;
-                        if ($timeUntil > 0) {
-                            $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-                            echo $interval;
-                        } else {
-                            echo 'pending';
-                        }
-                    } else {
-                        echo 'never updated';
-                    }
-		    ?>
+				<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $adjustedTTL, $now, true) ?>
 			</td>
 		</tr>
 		<?php } ?>
@@ -138,22 +126,10 @@ $now = time();
 				<?= $this->getStats()->humanIntervalFromSeconds($feed->ttl) ?>
 			</td>
 			<td>
-				<?= ($feed->lastUpdate > 0) ? $this->getStats()->humanIntervalFromSeconds($now - $feed->lastUpdate).' ago' : 'never' ?>
+				<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
 			</td>
 			<td>
-				<?php
-		        if ($feed->lastUpdate > 0) {
-		            $timeUntil = $feed->lastUpdate + $feed->ttl - $now;
-		            if ($timeUntil > 0) {
-		                $interval = $this->getStats()->humanIntervalFromSeconds($timeUntil);
-		                echo $interval;
-		            } else {
-		                echo 'pending';
-		            }
-		        } else {
-		            echo 'never updated';
-		        }
-		    ?>
+				<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $feed->ttl, $now, false) ?>
 			</td>
 		</tr>
 		<?php } ?>

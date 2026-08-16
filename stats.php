@@ -8,6 +8,14 @@ class StatItem
 
     public int $lastUpdate;
 
+    public int $lastError;
+
+    public int $lastAttempt;
+
+    public bool $isErroring;
+
+    public int $errorJitter;
+
     public int $ttl;
 
     public int $avgTTL;
@@ -19,6 +27,10 @@ class StatItem
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
         $this->lastUpdate = (int) $feed['lastUpdate'];
+        $this->lastError = (int) ($feed['error'] ?? 0);
+        $this->lastAttempt = AutoTTLExtension::calcLastAttempt($this->lastUpdate, $this->lastError);
+        $this->isErroring = AutoTTLExtension::calcIsErroring($this->lastUpdate, $this->lastError);
+        $this->errorJitter = AutoTTLExtension::calcErrorJitter($this->id, $this->lastUpdate, $this->lastError);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
         $this->maxTTL = $maxTTL;
@@ -115,13 +127,20 @@ SQL;
             $where = 'feed.ttl != 0';
         }
 
+        // Mirrors AutoTTLExtension::calcLastAttempt(): the legacy error sentinel (1) is
+        // not a real timestamp, so it's excluded from the "last attempt" anchor used below.
+        // This must match the anchor the throttle engine uses (feedBeforeActualizeHook),
+        // otherwise the displayed adjusted TTL diverges from the one actually applied.
+        $lastAttempt = "(CASE WHEN feed.error > 1 AND feed.error > feed.`lastUpdate` THEN feed.error ELSE feed.`lastUpdate` END)";
+
         $sql = <<<SQL
 SELECT
     feed.id,
     feed.name,
     feed.`lastUpdate`,
+    feed.error,
     feed.ttl,
-    COALESCE((feed.`lastUpdate` - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
+    COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_feed` AS feed
 LEFT JOIN (
     SELECT id_feed, date
@@ -130,7 +149,7 @@ LEFT JOIN (
 ) AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY COALESCE((feed.`lastUpdate` - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
+ORDER BY COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
 
@@ -143,6 +162,37 @@ SQL;
         }
 
         return $list;
+    }
+
+    public function formatLastAttempt(StatItem $feed, int $now): string
+    {
+        if ($feed->isErroring) {
+            return $feed->lastError > AutoTTLExtension::LEGACY_ERROR_SENTINEL
+                ? 'error ' . $this->humanIntervalFromSeconds($now - $feed->lastError) . ' ago'
+                : 'error (time unknown)';
+        }
+
+        return $feed->lastUpdate > 0
+            ? $this->humanIntervalFromSeconds($now - $feed->lastUpdate) . ' ago'
+            : 'never';
+    }
+
+    public function formatTimeUntilNextUpdate(StatItem $feed, int $ttl, int $now, bool $includeJitter): string
+    {
+        if ($feed->lastAttempt === 0) {
+            return 'never attempted';
+        }
+
+        $jitter = $includeJitter ? $feed->errorJitter : 0;
+        $timeUntil = $feed->lastAttempt + $ttl + $jitter - $now;
+
+        $suffix = '';
+        if ($feed->isErroring) {
+            $jitterText = $jitter > 0 ? ', +' . $this->humanIntervalFromSeconds($jitter) . ' jitter' : '';
+            $suffix = ' (in error' . $jitterText . ')';
+        }
+
+        return ($timeUntil > 0 ? $this->humanIntervalFromSeconds($timeUntil) : 'pending') . $suffix;
     }
 
     private function getStatsCutoff(): int
