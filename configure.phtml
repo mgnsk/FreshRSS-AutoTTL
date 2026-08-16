@@ -71,6 +71,7 @@ $now = time();
 			<th>Feed</th>
 			<th>Average TTL in last 30d</th>
 			<th>Adjusted update TTL</th>
+			<th>Error backoff TTL</th>
 			<th>Last update</th>
 			<th>Time until next update</th>
 		</thead>
@@ -85,7 +86,10 @@ $now = time();
 				<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 			</td>
 			<td>
-				<?= $this->getStats()->humanIntervalFromSeconds($feed->backoffTTL) ?>
+				<?= $this->getStats()->humanIntervalFromSeconds($feed->baseTTL) ?>
+			</td>
+			<td>
+				<?= $feed->isErroring ? $this->getStats()->humanIntervalFromSeconds($feed->backoffTTL) : '—' ?>
 			</td>
 			<td>
 				<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
