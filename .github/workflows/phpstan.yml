@@ -1,0 +1,25 @@
+name: PHPStan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  phpstan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: php-actions/composer@v6
+        with:
+          args: --ignore-platform-reqs
+
+      - name: PHPStan
+        uses: php-actions/phpstan@v3
+        with:
+          configuration: phpstan.neon
+          memory_limit: 512M
