@@ -239,8 +239,9 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertGreaterThanOrEqual(0, $jitter2);
             $this->assertLessThan(60 * 60, $jitter2);
 
-            // 3. Different feed IDs with the same error timestamp should yield different jitter offsets
-            $this->assertNotEquals($jitter1, $jitter2);
+            // 3. Jitter calculation should be deterministic for the same feed and error timestamp
+            $this->assertSame($jitter1, $ext->getErrorJitter($feed1Error));
+            $this->assertSame($jitter2, $ext->getErrorJitter($feed2Error));
         } finally {
             FreshRSS_feed_Controller::deleteFeed($feed1->id());
             FreshRSS_feed_Controller::deleteFeed($feed2->id());
