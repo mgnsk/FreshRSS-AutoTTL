@@ -4,9 +4,123 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "638693175e16a850e1c851705af92fda",
+    "content-hash": "b7b4d3a9b97d6ce98a886b0dc89c1f26",
     "packages": [],
     "packages-dev": [
+        {
+            "name": "freshrss.org/freshrss",
+            "version": "1.29.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/FreshRSS/FreshRSS.git",
+                "reference": "b2c50115baa36c217e939ee3ea8ecfae52f91abd"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/FreshRSS/FreshRSS/zipball/b2c50115baa36c217e939ee3ea8ecfae52f91abd",
+                "reference": "b2c50115baa36c217e939ee3ea8ecfae52f91abd",
+                "shasum": ""
+            },
+            "require": {
+                "ext-ctype": "*",
+                "ext-curl": "*",
+                "ext-dom": "*",
+                "ext-fileinfo": "*",
+                "ext-gmp": "*",
+                "ext-intl": "*",
+                "ext-json": "*",
+                "ext-libxml": "*",
+                "ext-mbstring": "*",
+                "ext-openssl": "*",
+                "ext-pcre": "*",
+                "ext-pdo": "*",
+                "ext-pdo_sqlite": "*",
+                "ext-session": "*",
+                "ext-simplexml": "*",
+                "ext-xml": "*",
+                "ext-xmlreader": "*",
+                "ext-zend-opcache": "*",
+                "ext-zip": "*",
+                "ext-zlib": "*",
+                "php": ">=8.1"
+            },
+            "require-dev": {
+                "ext-phar": "*",
+                "ext-tokenizer": "*",
+                "ext-xmlwriter": "*",
+                "php": ">=8.1",
+                "phpstan/phpstan": "^2.1",
+                "phpstan/phpstan-deprecation-rules": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "phpunit/phpunit": "^10",
+                "squizlabs/php_codesniffer": "^4.0"
+            },
+            "suggest": {
+                "ext-iconv": "*",
+                "ext-pdo_mysql": "*",
+                "ext-pdo_pgsql": "*"
+            },
+            "type": "project",
+            "scripts": {
+                "php-lint": [
+                    "find . -type d -name 'vendor' -prune -o -name '*.php' -print0 | xargs -0 -n1 -P4 php -l 1>/dev/null"
+                ],
+                "phtml-lint": [
+                    "find . -type d -name 'vendor' -prune -o -name '*.phtml' -print0 | xargs -0 -n1 -P4 php -l 1>/dev/null"
+                ],
+                "phpcs": [
+                    "phpcs . -s"
+                ],
+                "phpcbf": [
+                    "phpcbf . -p -s"
+                ],
+                "phpstan": [
+                    "phpstan analyse --memory-limit 512M ."
+                ],
+                "phpstan-next": [
+                    "phpstan analyse --memory-limit 512M -c phpstan-next.neon ."
+                ],
+                "phpunit": [
+                    "phpunit --bootstrap ./tests/bootstrap.php --display-notices --display-deprecations --display-phpunit-deprecations ./tests"
+                ],
+                "compile-plurals": [
+                    "php cli/compile.plurals.php --all"
+                ],
+                "translations": [
+                    "cli/manipulate.translation.php --action format && php cli/compile.plurals.php --all && cli/check.translation.php --generate-readme"
+                ],
+                "test": [
+                    "@php-lint",
+                    "@phtml-lint",
+                    "@phpunit",
+                    "@phpcs",
+                    "@phpstan"
+                ],
+                "fix": [
+                    "@translations",
+                    "@phpcbf"
+                ]
+            },
+            "license": [
+                "AGPL-3.0"
+            ],
+            "description": "A free, self-hostable aggregator",
+            "homepage": "https://freshrss.org/",
+            "keywords": [
+                "Atom",
+                "RSS",
+                "WebSub",
+                "aggregator",
+                "news"
+            ],
+            "support": {
+                "docs": "https://freshrss.github.io/FreshRSS/",
+                "issues": "https://github.com/FreshRSS/FreshRSS/issues",
+                "source": "https://github.com/FreshRSS/FreshRSS/"
+            },
+            "time": "2026-05-20T17:47:37+00:00"
+        },
         {
             "name": "myclabs/deep-copy",
             "version": "1.13.4",
@@ -1810,5 +1924,8 @@
     "prefer-lowest": false,
     "platform": {},
     "platform-dev": {},
+    "platform-overrides": {
+        "ext-gmp": "8.5.9"
+    },
     "plugin-api-version": "2.9.0"
 }
