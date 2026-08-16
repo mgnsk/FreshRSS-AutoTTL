@@ -239,6 +239,9 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertGreaterThanOrEqual(0, $jitter2);
             $this->assertLessThan(60 * 60, $jitter2);
 
+            // Jitter is per-feed, so two feeds erroring at the same instant must be staggered.
+            $this->assertNotSame($jitter1, $jitter2);
+
             // 3. Jitter calculation should be deterministic for the same feed and error timestamp
             $this->assertSame($jitter1, $ext->getErrorJitter($feed1Error));
             $this->assertSame($jitter2, $ext->getErrorJitter($feed2Error));

@@ -11,6 +11,10 @@ class AutoTTLExtension extends Minz_Extension
 
     private const ERROR_JITTER = 60 * 60; // 1 hour max jitter for errored feeds
 
+    // FreshRSS_Feed::lastError() legacy-returns 1 (not a real timestamp) for feeds
+    // whose error state predates the _feed.error column becoming a BIGINT timestamp.
+    public const LEGACY_ERROR_SENTINEL = 1;
+
     public int $defaultTTL;
 
     public int $maxTTL;
@@ -62,7 +66,7 @@ class AutoTTLExtension extends Minz_Extension
 
     public static function calcErrorJitter(int $feedId, int $lastUpdate, int $lastError): int
     {
-        if ($lastError <= $lastUpdate || self::ERROR_JITTER <= 0) {
+        if (!self::calcIsErroring($lastUpdate, $lastError) || self::ERROR_JITTER <= 0) {
             return 0;
         }
 
@@ -72,6 +76,29 @@ class AutoTTLExtension extends Minz_Extension
     public function getErrorJitter(FreshRSS_Feed $feed): int
     {
         return self::calcErrorJitter($feed->id(), $feed->lastUpdate(), $feed->lastError());
+    }
+
+    /*
+     * Whether the feed's most recent fetch attempt ended in an error.
+     * Guards against the legacy sentinel value of lastError(), which is not comparable to lastUpdate().
+     */
+    public static function calcIsErroring(int $lastUpdate, int $lastError): bool
+    {
+        return $lastError === self::LEGACY_ERROR_SENTINEL || $lastError > $lastUpdate;
+    }
+
+    /*
+     * Timestamp of the feed's most recent fetch attempt (success or error).
+     * Falls back to lastUpdate() when lastError() is the legacy sentinel, since
+     * its real timestamp is unknown.
+     */
+    public static function calcLastAttempt(int $lastUpdate, int $lastError): int
+    {
+        if ($lastError <= self::LEGACY_ERROR_SENTINEL) {
+            return $lastUpdate;
+        }
+
+        return max($lastUpdate, $lastError);
     }
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
@@ -86,7 +113,7 @@ class AutoTTLExtension extends Minz_Extension
             return $feed;
         }
 
-        $lastAttempt = max($feed->lastUpdate(), $feed->lastError());
+        $lastAttempt = self::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         if ($lastAttempt === 0) {
             Minz_Log::debug(
                 sprintf(
