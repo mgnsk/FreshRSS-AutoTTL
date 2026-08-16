@@ -25,8 +25,6 @@ class MockTime implements TimeSource
 
 final class AutoTTLStatsTest extends TestCase
 {
-    private $feedId;
-
     protected function setUp(): void
     {
     }
@@ -88,6 +86,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
+        $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
 
@@ -98,7 +97,9 @@ final class AutoTTLStatsTest extends TestCase
             // (16:00 - 00:00) / 3 = 57600 seconds / 3 = 19200 seconds
             $this->assertSame(19200, $adjustedTTL);
         } finally {
-            FreshRSS_feed_Controller::deleteFeed($feed->id());
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
         }
     }
 
@@ -107,6 +108,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
+        $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
@@ -130,7 +132,9 @@ final class AutoTTLStatsTest extends TestCase
 
 
         } finally {
-            FreshRSS_feed_Controller::deleteFeed($feed->id());
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
         }
     }
 
@@ -168,6 +172,7 @@ final class AutoTTLStatsTest extends TestCase
 
     public function test_feed_before_actualize_throttles_recent_error(): void
     {
+        $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
 
@@ -198,12 +203,16 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertNotNull($result);
             $this->assertSame($feed->id(), $result->id());
         } finally {
-            FreshRSS_feed_Controller::deleteFeed($feed->id());
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
         }
     }
 
     public function test_error_jitter_staggers_errored_feeds(): void
     {
+        $feed1 = null;
+        $feed2 = null;
         try {
             $feed1 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
             $feed2 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
@@ -253,8 +262,12 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertSame($jitter1, $ext->getErrorJitter($feed1Error));
             $this->assertSame($jitter2, $ext->getErrorJitter($feed2Error));
         } finally {
-            FreshRSS_feed_Controller::deleteFeed($feed1->id());
-            FreshRSS_feed_Controller::deleteFeed($feed2->id());
+            if ($feed1 !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed1->id());
+            }
+            if ($feed2 !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed2->id());
+            }
         }
     }
 }
