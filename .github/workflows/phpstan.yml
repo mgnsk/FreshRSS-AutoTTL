@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         uses: php-actions/composer@v6
         with:
-          args: --ignore-platform-req=ext-gmp --ignore-platform-req=ext-intl
+          args: --ignore-platform-reqs
 
       - name: PHPStan
         uses: php-actions/phpstan@v3
