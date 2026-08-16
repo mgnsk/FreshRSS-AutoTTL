@@ -135,7 +135,7 @@ class AutoTTLExtension extends Minz_Extension
 
         Minz_Log::debug(
             sprintf(
-                'AutoTTL: updating feed %d (%s, last attempt %s, adjusted TTL %ds)',
+                'AutoTTL: updating feed %d (%s, last attempt %s, backoff TTL %ds)',
                 $feed->id(),
                 $feed->name(),
                 date('r', $lastAttempt),
