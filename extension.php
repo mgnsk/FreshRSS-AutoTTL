@@ -9,17 +9,11 @@ class AutoTTLExtension extends Minz_Extension
 
     private const STATS_COUNT = 100;
 
-    // Not currently user-configurable, but shaped as if it could be:
-    // threaded through as a value rather than hardcoded where it's used.
-    private const ERROR_JITTER = 60 * 60; // 1 hour max jitter for errored feeds
-
     public int $defaultTTL;
 
     public int $maxTTL;
 
     public int $statsCount;
-
-    public int $errorJitterMax;
 
     /**
      * @var AutoTTLStats
@@ -39,7 +33,6 @@ class AutoTTLExtension extends Minz_Extension
         $this->defaultTTL = FreshRSS_Context::userConf()->attributeInt('ttl_default') ?? FreshRSS_Feed::TTL_DEFAULT;
         $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl') ?? self::MAX_TTL;
         $this->statsCount = FreshRSS_Context::userConf()->attributeInt('auto_ttl_stats_count') ?? self::STATS_COUNT;
-        $this->errorJitterMax = self::ERROR_JITTER;
     }
 
     /*
@@ -59,15 +52,25 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->errorJitterMax);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount);
         }
 
         return $this->stats;
     }
 
-    public function getErrorJitter(FreshRSS_Feed $feed): int
+    public function getBackoffTTL(FreshRSS_Feed $feed, int $baseTTL): int
     {
-        return StatItem::calcErrorJitter($feed->id(), $feed->lastUpdate(), $feed->lastError(), $this->errorJitterMax);
+        $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
+        $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
+
+        return StatItem::calcBackoffTTL($baseTTL, $feed->lastUpdate(), $lastAttempt, $isErroring, $this->maxTTL);
+    }
+
+    public function getErrorJitter(FreshRSS_Feed $feed, int $backoffTTL): int
+    {
+        $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
+
+        return StatItem::calcErrorJitter($feed->id(), $backoffTTL, $feed->lastError(), $isErroring);
     }
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
@@ -109,18 +112,20 @@ class AutoTTLExtension extends Minz_Extension
 
         $timeSinceLastAttempt = time() - $lastAttempt;
         $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
-        $jitter = $this->getErrorJitter($feed);
-        $effectiveTTL = $ttl + $jitter;
+        $backoffTTL = $this->getBackoffTTL($feed, $ttl);
+        $jitter = $this->getErrorJitter($feed, $backoffTTL);
+        $effectiveTTL = $backoffTTL + $jitter;
 
         if ($timeSinceLastAttempt < $effectiveTTL) {
             Minz_Log::debug(
                 sprintf(
-                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds = %ds TTL + %ds jitter) not exceeded yet',
+                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds = %ds TTL + %ds backoff + %ds jitter) not exceeded yet',
                     $feed->id(),
                     $feed->name(),
                     date('r', $lastAttempt),
                     $effectiveTTL,
                     $ttl,
+                    $backoffTTL - $ttl,
                     $jitter,
                 )
             );
@@ -134,7 +139,7 @@ class AutoTTLExtension extends Minz_Extension
                 $feed->id(),
                 $feed->name(),
                 date('r', $lastAttempt),
-                $ttl,
+                $backoffTTL,
             )
         );
 
