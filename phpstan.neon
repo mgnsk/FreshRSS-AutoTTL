@@ -1,0 +1,14 @@
+parameters:
+    level: 5
+    paths:
+        - extension.php
+        - stats.php
+        - tests
+    scanDirectories:
+        - vendor/freshrss.org/freshrss/lib
+        - vendor/freshrss.org/freshrss/app
+    ignoreErrors:
+        -
+            identifier: require.fileNotFound
+            message: '#/var/www/FreshRSS#'
+            path: tests/*
