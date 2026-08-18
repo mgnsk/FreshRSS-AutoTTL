@@ -182,9 +182,17 @@ WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()}
 SQL;
 
         $stm = $this->pdo->query($sql);
-        $res = $stm->fetch(PDO::FETCH_NAMED);
+        if ($stm !== false) {
+            $res = $stm->fetch(PDO::FETCH_NAMED);
+            if ($res !== false) {
+                return $this->calcAdjustedTTL((int) $res['avgTTL']);
+            }
+        }
 
-        return $this->calcAdjustedTTL((int) $res['avgTTL']);
+        $info = $stm === false ? $this->pdo->errorInfo() : $stm->errorInfo();
+        Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($info));
+
+        return $this->calcAdjustedTTL(0);
     }
 
     public function getFeedStats(bool $usesAutoTTL): array
@@ -218,20 +226,24 @@ LEFT JOIN (
 ) AS stats ON feed.id = stats.id_feed
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY `avgTTL` = 0, `avgTTL` ASC
+ORDER BY COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
 LIMIT {$this->statsCount}
 SQL;
 
         $stm = $this->pdo->query($sql);
-        $res = $stm->fetchAll(PDO::FETCH_NAMED);
+        if ($stm !== false) {
+            $list = [];
+            foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $feed) {
+                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL']);
+                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL);
+            }
 
-        $list = [];
-        foreach ($res as $feed) {
-            $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL']);
-            $list[] = new StatItem($feed, $baseTTL, $this->maxTTL);
+            return $list;
         }
 
-        return $list;
+        Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($this->pdo->errorInfo()));
+
+        return [];
     }
 
     public function formatLastAttempt(StatItem $feed, int $now): string
