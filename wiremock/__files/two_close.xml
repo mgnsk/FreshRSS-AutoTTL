@@ -3,12 +3,12 @@
   <title>Example Feed</title>
   <entry>
     <title>One</title>
-    <updated>2000-01-01T00:00:00Z</updated>
+    <updated>{{now offset='-172800 seconds' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
     <summary>Some text.</summary>
   </entry>
   <entry>
     <title>Two</title>
-    <updated>2000-01-01T00:00:02Z</updated>
+    <updated>{{now offset='-172798 seconds' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
     <summary>Some text.</summary>
   </entry>
 </feed>

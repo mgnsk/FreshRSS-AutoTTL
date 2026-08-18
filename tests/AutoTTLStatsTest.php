@@ -8,21 +8,6 @@ require '/var/www/FreshRSS/cli/_cli.php';
 
 FreshRSS_Context::initUser('admin');
 
-class MockTime implements TimeSource
-{
-    private $ts;
-
-    public function __construct(int $ts)
-    {
-        $this->ts = $ts;
-    }
-
-    public function time(): int
-    {
-        return $this->ts;
-    }
-}
-
 final class AutoTTLStatsTest extends TestCase
 {
     protected function setUp(): void
@@ -102,12 +87,15 @@ final class AutoTTLStatsTest extends TestCase
         $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+            // Captured after the fetch so it's always >= wiremock's own "now" used
+            // to render the feed's entry dates, keeping the date <= lastUpdate
+            // bound below safe from PHP/wiremock clock skew.
+            $now = time();
 
             $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
-            $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now);
 
-            // (16:00 - 00:00) / 3 = 57600 seconds / 3 = 19200 seconds
+            // (now - -16h) / 3 = 57600 seconds / 3 = 19200 seconds
             $this->assertSame(19200, $adjustedTTL);
         } finally {
             if ($feed !== null) {
@@ -124,23 +112,26 @@ final class AutoTTLStatsTest extends TestCase
         $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+            // Captured after the fetch so it's always >= wiremock's own "now"
+            // used to render the feed's entry dates (2 days ago and 2 days ago
+            // + 2 seconds); see test_get_avg_ttl_three_per_day for why.
+            $now = time();
 
             $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
-            $stats->setTimeSource(new MockTime(strtotime("2000-01-04T00:00:00Z")));
 
             // Two updates in a row when we checked implies frequent updates.
-            // (00:02 - 00:00) / 2 = 2 seconds / 2 = 1 seconds < $default
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T00:00:02Z"));
+            // 2 seconds / 2 entries = 1 second < $defaultTTL
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 172798);
             $this->assertSame($defaultTTL, $adjustedTTL);
 
             // Two updates in a row, but hours ago, implies moderate updates.
-            // (16:00 - 00:00) / 2 = 57600 seconds / 2 = 28800 seconds
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
+            // (-115200 - -172800) / 2 = 57600 seconds / 2 = 28800 seconds
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 115200);
             $this->assertSame(28800, $adjustedTTL);
 
             // Two updates in a row, but days ago, implies slow updates.
             // 2 days > 1 day $maxTTL
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-03T00:00:00Z"));
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now);
             $this->assertSame($maxTTL, $adjustedTTL);
 
 
@@ -161,16 +152,13 @@ final class AutoTTLStatsTest extends TestCase
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
 
             $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
-            $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), time());
 
-            // future_dated.xml's entries are dated relative to real time (wiremock's
-            // "now" templating helper, offset +2/+3 years) rather than a fixed
-            // calendar date, so this stays true regardless of when the test runs.
-            // They're after lastAttempt (fixed at year 2000 here), so they must be
-            // excluded from the average instead of making it negative. avgTTL
-            // resolves to 0 ("not enough data"), which must map to maxTTL, not
-            // defaultTTL (regression test for linuxdaw.org/rss.xml issue).
+            // future_dated.xml's entries are dated via wiremock's "now" templating
+            // helper, offset +2/+3 years, so they're always after lastUpdate (~now)
+            // and must be excluded from the average instead of making it negative.
+            // avgTTL resolves to 0 ("not enough data"), which must map to maxTTL,
+            // not defaultTTL (regression test for linuxdaw.org/rss.xml issue).
             $this->assertSame($maxTTL, $adjustedTTL);
         } finally {
             if ($feed !== null) {
@@ -200,8 +188,8 @@ final class AutoTTLStatsTest extends TestCase
             // getFeedStats() reads feed.lastUpdate straight from the DB (unlike
             // getAdjustedTTL(), which takes it as a parameter), so pin it to a
             // known value to make the avgTTL assertion below deterministic.
-            $feedDAO->updateLastUpdate($autoTTLFeed->id(), strtotime('2000-01-01T16:00:00Z'));
-            $feedDAO->updateLastUpdate($futureDatedFeed->id(), strtotime('2000-01-01T16:00:00Z'));
+            $feedDAO->updateLastUpdate($autoTTLFeed->id(), $now);
+            $feedDAO->updateLastUpdate($futureDatedFeed->id(), $now);
 
             // Push lastUpdate back first so the error timestamp set below is more
             // recent than it, which is what makes calcIsErroring() consider the feed erroring.
@@ -210,7 +198,6 @@ final class AutoTTLStatsTest extends TestCase
             $feedDAO->updateFeed($customTTLFeed->id(), ['ttl' => 1800]);
 
             $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
-            $stats->setTimeSource(new MockTime(strtotime('2000-01-02T00:00:00Z')));
 
             $autoTTLStats = $stats->getFeedStats(true);
             $autoTTLIds = array_map(fn (StatItem $item) => $item->id, $autoTTLStats);
@@ -223,16 +210,14 @@ final class AutoTTLStatsTest extends TestCase
             foreach ($autoTTLStats as $item) {
                 if ($item->id === $autoTTLFeed->id()) {
                     $this->assertFalse($item->isErroring);
-                    // (16:00 - 00:00) / 3 = 19200 seconds
+                    // (now - -16h) / 3 = 19200 seconds
                     $this->assertSame(19200, $item->avgTTL);
                 } elseif ($item->id === $erroredFeed->id()) {
                     $this->assertTrue($item->isErroring);
                 } elseif ($item->id === $futureDatedFeed->id()) {
-                    // future_dated.xml's entries are dated relative to real time
-                    // (wiremock's "now" templating helper, offset +2/+3 years)
-                    // rather than a fixed calendar date, so this stays true
-                    // regardless of when the test runs. They're after lastUpdate
-                    // (fixed at year 2000 here), so they must be excluded from the
+                    // future_dated.xml's entries are dated via wiremock's "now"
+                    // templating helper, offset +2/+3 years, so they're always
+                    // after lastUpdate (~now) and must be excluded from the
                     // average instead of making it negative. avgTTL resolves to 0
                     // ("not enough data"), which must map to maxTTL, not defaultTTL
                     // (regression test for linuxdaw.org/rss.xml issue).
