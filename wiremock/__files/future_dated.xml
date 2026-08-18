@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Feed</title>
+  <entry>
+    <title>One</title>
+    <updated>{{now offset='2 years' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
+    <summary>Some text.</summary>
+  </entry>
+  <entry>
+    <title>Two</title>
+    <updated>{{now offset='3 years' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
+    <summary>Some text.</summary>
+  </entry>
+</feed>
