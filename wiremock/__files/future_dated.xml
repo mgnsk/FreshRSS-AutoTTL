@@ -3,12 +3,12 @@
   <title>Example Feed</title>
   <entry>
     <title>One</title>
-    <updated>2027-07-29T00:00:00Z</updated>
+    <updated>{{now offset='2 years' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
     <summary>Some text.</summary>
   </entry>
   <entry>
     <title>Two</title>
-    <updated>2028-08-04T00:00:00Z</updated>
+    <updated>{{now offset='3 years' format="yyyy-MM-dd'T'HH:mm:ss'Z'"}}</updated>
     <summary>Some text.</summary>
   </entry>
 </feed>

@@ -164,7 +164,10 @@ final class AutoTTLStatsTest extends TestCase
             $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
 
-            // Entries dated in 2027/2028 are after lastAttempt, so they must be
+            // future_dated.xml's entries are dated relative to real time (wiremock's
+            // "now" templating helper, offset +2/+3 years) rather than a fixed
+            // calendar date, so this stays true regardless of when the test runs.
+            // They're after lastAttempt (fixed at year 2000 here), so they must be
             // excluded from the average instead of making it negative. avgTTL
             // resolves to 0 ("not enough data"), which must map to maxTTL, not
             // defaultTTL (regression test for linuxdaw.org/rss.xml issue).
@@ -225,10 +228,14 @@ final class AutoTTLStatsTest extends TestCase
                 } elseif ($item->id === $erroredFeed->id()) {
                     $this->assertTrue($item->isErroring);
                 } elseif ($item->id === $futureDatedFeed->id()) {
-                    // Entries dated in 2027/2028 are after lastUpdate, so they must
-                    // be excluded from the average instead of making it negative.
-                    // avgTTL resolves to 0 ("not enough data"), which must map to
-                    // maxTTL, not defaultTTL (regression test for linuxdaw.org/rss.xml issue).
+                    // future_dated.xml's entries are dated relative to real time
+                    // (wiremock's "now" templating helper, offset +2/+3 years)
+                    // rather than a fixed calendar date, so this stays true
+                    // regardless of when the test runs. They're after lastUpdate
+                    // (fixed at year 2000 here), so they must be excluded from the
+                    // average instead of making it negative. avgTTL resolves to 0
+                    // ("not enough data"), which must map to maxTTL, not defaultTTL
+                    // (regression test for linuxdaw.org/rss.xml issue).
                     $this->assertSame(0, $item->avgTTL);
                     $this->assertSame($maxTTL, $item->baseTTL);
                 }
