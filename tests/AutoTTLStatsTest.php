@@ -138,6 +138,72 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
+    public function test_get_feed_stats(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        $autoTTLFeed = null;
+        $erroredFeed = null;
+        $customTTLFeed = null;
+        try {
+            $autoTTLFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+            $erroredFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+            $customTTLFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml?custom_ttl');
+
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+            $now = time();
+
+            // getFeedStats() reads feed.lastUpdate straight from the DB (unlike
+            // getAdjustedTTL(), which takes it as a parameter), so pin it to a
+            // known value to make the avgTTL assertion below deterministic.
+            $feedDAO->updateLastUpdate($autoTTLFeed->id(), strtotime('2000-01-01T16:00:00Z'));
+
+            // Push lastUpdate back first so the error timestamp set below is more
+            // recent than it, which is what makes calcIsErroring() consider the feed erroring.
+            $feedDAO->updateLastUpdate($erroredFeed->id(), $now - 86400);
+            $feedDAO->updateLastError($erroredFeed->id(), $now - 600);
+            $feedDAO->updateFeed($customTTLFeed->id(), ['ttl' => 1800]);
+
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats->setTimeSource(new MockTime(strtotime('2000-01-02T00:00:00Z')));
+
+            $autoTTLStats = $stats->getFeedStats(true);
+            $autoTTLIds = array_map(fn (StatItem $item) => $item->id, $autoTTLStats);
+
+            $this->assertContains($autoTTLFeed->id(), $autoTTLIds);
+            $this->assertContains($erroredFeed->id(), $autoTTLIds);
+            $this->assertNotContains($customTTLFeed->id(), $autoTTLIds);
+
+            foreach ($autoTTLStats as $item) {
+                if ($item->id === $autoTTLFeed->id()) {
+                    $this->assertFalse($item->isErroring);
+                    // (16:00 - 00:00) / 3 = 19200 seconds
+                    $this->assertSame(19200, $item->avgTTL);
+                } elseif ($item->id === $erroredFeed->id()) {
+                    $this->assertTrue($item->isErroring);
+                }
+            }
+
+            $customTTLStats = $stats->getFeedStats(false);
+            $customTTLIds = array_map(fn (StatItem $item) => $item->id, $customTTLStats);
+
+            $this->assertContains($customTTLFeed->id(), $customTTLIds);
+            $this->assertNotContains($autoTTLFeed->id(), $customTTLIds);
+            $this->assertNotContains($erroredFeed->id(), $customTTLIds);
+        } finally {
+            if ($autoTTLFeed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($autoTTLFeed->id());
+            }
+            if ($erroredFeed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($erroredFeed->id());
+            }
+            if ($customTTLFeed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($customTTLFeed->id());
+            }
+        }
+    }
+
     public function test_stat_item_last_attempt(): void
     {
         $baseTTL = 3600;
