@@ -57,6 +57,19 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame($maxTTL, $adjustedTTL);
     }
 
+    public function test_avg_ttl_negative(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $adjustedTTL = $stats->calcAdjustedTTL(-100);
+
+        // maxTTL returned, not defaultTTL: a negative avgTTL (e.g. from a feed
+        // with future-dated entries) means "not enough data", same as zero.
+        $this->assertSame($maxTTL, $adjustedTTL);
+    }
+
     public function test_avg_ttl_gt_max_ttl(): void
     {
         $defaultTTL = 3600;
@@ -138,6 +151,31 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
+    public function test_get_avg_ttl_future_dated_entries_ignored(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        $feed = null;
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
+
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats->setTimeSource(new MockTime(strtotime("2000-01-02T00:00:00Z")));
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), strtotime("2000-01-01T16:00:00Z"));
+
+            // Entries dated in 2027/2028 are after lastAttempt, so they must be
+            // excluded from the average instead of making it negative. avgTTL
+            // resolves to 0 ("not enough data"), which must map to maxTTL, not
+            // defaultTTL (regression test for linuxdaw.org/rss.xml issue).
+            $this->assertSame($maxTTL, $adjustedTTL);
+        } finally {
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
+        }
+    }
+
     public function test_get_feed_stats(): void
     {
         $defaultTTL = 3600;
@@ -146,10 +184,12 @@ final class AutoTTLStatsTest extends TestCase
         $autoTTLFeed = null;
         $erroredFeed = null;
         $customTTLFeed = null;
+        $futureDatedFeed = null;
         try {
             $autoTTLFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
             $erroredFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
             $customTTLFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml?custom_ttl');
+            $futureDatedFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
 
             $feedDAO = FreshRSS_Factory::createFeedDao();
             $now = time();
@@ -158,6 +198,7 @@ final class AutoTTLStatsTest extends TestCase
             // getAdjustedTTL(), which takes it as a parameter), so pin it to a
             // known value to make the avgTTL assertion below deterministic.
             $feedDAO->updateLastUpdate($autoTTLFeed->id(), strtotime('2000-01-01T16:00:00Z'));
+            $feedDAO->updateLastUpdate($futureDatedFeed->id(), strtotime('2000-01-01T16:00:00Z'));
 
             // Push lastUpdate back first so the error timestamp set below is more
             // recent than it, which is what makes calcIsErroring() consider the feed erroring.
@@ -173,6 +214,7 @@ final class AutoTTLStatsTest extends TestCase
 
             $this->assertContains($autoTTLFeed->id(), $autoTTLIds);
             $this->assertContains($erroredFeed->id(), $autoTTLIds);
+            $this->assertContains($futureDatedFeed->id(), $autoTTLIds);
             $this->assertNotContains($customTTLFeed->id(), $autoTTLIds);
 
             foreach ($autoTTLStats as $item) {
@@ -182,6 +224,13 @@ final class AutoTTLStatsTest extends TestCase
                     $this->assertSame(19200, $item->avgTTL);
                 } elseif ($item->id === $erroredFeed->id()) {
                     $this->assertTrue($item->isErroring);
+                } elseif ($item->id === $futureDatedFeed->id()) {
+                    // Entries dated in 2027/2028 are after lastUpdate, so they must
+                    // be excluded from the average instead of making it negative.
+                    // avgTTL resolves to 0 ("not enough data"), which must map to
+                    // maxTTL, not defaultTTL (regression test for linuxdaw.org/rss.xml issue).
+                    $this->assertSame(0, $item->avgTTL);
+                    $this->assertSame($maxTTL, $item->baseTTL);
                 }
             }
 
@@ -200,6 +249,9 @@ final class AutoTTLStatsTest extends TestCase
             }
             if ($customTTLFeed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($customTTLFeed->id());
+            }
+            if ($futureDatedFeed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($futureDatedFeed->id());
             }
         }
     }

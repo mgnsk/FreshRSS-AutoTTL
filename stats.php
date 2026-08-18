@@ -163,7 +163,7 @@ class AutoTTLStats extends Minz_ModelPdo
             return $this->defaultTTL;
         }
 
-        if ($avgTTL === 0 || $avgTTL > $this->maxTTL) {
+        if ($avgTTL <= 0 || $avgTTL > $this->maxTTL) {
             return $this->maxTTL;
         } elseif ($avgTTL < $this->defaultTTL) {
             return $this->defaultTTL;
@@ -178,7 +178,7 @@ class AutoTTLStats extends Minz_ModelPdo
 SELECT
     COALESCE(({$lastUpdate} - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_entry` AS stats
-WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()}
+WHERE id_feed = {$feedID} AND date > {$this->getStatsCutoff()} AND date <= {$lastUpdate}
 SQL;
 
         $stm = $this->pdo->query($sql);
@@ -223,7 +223,7 @@ LEFT JOIN (
     SELECT id_feed, date
     FROM `_entry`
     WHERE date > {$this->getStatsCutoff()}
-) AS stats ON feed.id = stats.id_feed
+) AS stats ON feed.id = stats.id_feed AND stats.date <= {$lastAttempt}
 WHERE {$where}
 GROUP BY feed.id
 ORDER BY COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
