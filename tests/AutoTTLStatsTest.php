@@ -30,6 +30,58 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame($defaultTTL, $adjustedTTL);
     }
 
+    public function test_min_ttl_floors_computed_ttl(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $minTTL = 7200;
+
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL);
+
+        // avgTTL resolves to defaultTTL (3600) via the normal path, but minTTL (7200) floors it.
+        $this->assertSame($minTTL, $adjustedTTL);
+    }
+
+    public function test_min_ttl_no_effect_when_computed_ttl_already_higher(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $minTTL = 1800;
+
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $adjustedTTL = $stats->calcAdjustedTTL(43200);
+
+        // avgTTL (43200) already exceeds minTTL, so minTTL has no effect.
+        $this->assertSame(43200, $adjustedTTL);
+    }
+
+    public function test_min_ttl_default_preserves_existing_behavior(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        // No 4th arg: minTTL defaults to 0, i.e. no floor - matches pre-change behavior.
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $adjustedTTL = $stats->calcAdjustedTTL(0);
+
+        $this->assertSame($maxTTL, $adjustedTTL);
+    }
+
+    public function test_min_ttl_floors_default_ttl_gt_max_ttl_escape_hatch(): void
+    {
+        // Mirrors test_default_ttl_gt_max_ttl, but minTTL exceeds even defaultTTL,
+        // confirming the escape hatch is floored too.
+        $defaultTTL = 3600;
+        $maxTTL = 3599;
+        $minTTL = 7200;
+
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $adjustedTTL = $stats->calcAdjustedTTL(1);
+
+        $this->assertSame($minTTL, $adjustedTTL);
+    }
+
     public function test_avg_ttl_zero(): void
     {
         $defaultTTL = 3600;
@@ -391,6 +443,40 @@ final class AutoTTLStatsTest extends TestCase
             $result = $ext->feedBeforeActualizeHook($feed);
             $this->assertNotNull($result);
             $this->assertSame($feed->id(), $result->id());
+        } finally {
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
+        }
+    }
+
+    public function test_feed_before_actualize_respects_min_ttl_floor(): void
+    {
+        $feed = null;
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+
+            $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
+            $metaInfo['path'] = dirname(__DIR__);
+            $ext = new AutoTTLExtension($metaInfo);
+            $ext->init();
+            $ext->defaultTTL = 3600;
+            // maxTTL below defaultTTL forces calcAdjustedTTL's escape hatch, so the
+            // pre-floor TTL is deterministically defaultTTL (3600s) regardless of
+            // the feed's actual entry timing.
+            $ext->maxTTL = 100;
+            $ext->minTTL = 7200; // simulate a high hidden cache_duration floor
+
+            $now = time();
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+            $feedDAO->updateLastUpdate($feed->id(), $now - 5000);
+            $feed = $feedDAO->searchById($feed->id());
+
+            // Without the floor, effective TTL would be defaultTTL (3600s) < 5000s
+            // elapsed, so the feed would be due. With the 7200s floor in effect,
+            // effective TTL becomes 7200s > 5000s elapsed, so it must stay throttled.
+            $result = $ext->feedBeforeActualizeHook($feed);
+            $this->assertNull($result);
         } finally {
             if ($feed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed->id());

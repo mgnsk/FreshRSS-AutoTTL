@@ -14,6 +14,18 @@ depending on the average frequency of entries.
 
 ![Screenshot 2024-10-17 at 16-42-11 AutoTTL · Extensions · FreshRSS](https://github.com/user-attachments/assets/ba712811-d65b-4cd7-ba91-c8cba5c40d64)
 
+# Interaction with FreshRSS's hidden HTTP cache
+
+FreshRSS has its own system-wide HTTP cache floor (`limits.cache_duration` in `data/config.php`, default 800 seconds)
+that is **not exposed in the admin web UI**. Before performing a real HTTP fetch, FreshRSS serves the on-disk feed
+cache instead if it is younger than this duration, and a feed's "last update" timestamp only advances when a real
+fetch actually happens. This means a feed can never be refreshed more often than this hidden interval, regardless of
+cron frequency or any TTL setting.
+
+AutoTTL reads this value from FreshRSS's system configuration and floors its own computed TTL at it, so its stats
+table and throttling decisions stay consistent with what FreshRSS will actually do. If `limits.cache_duration` is set
+higher than AutoTTL's own max TTL, AutoTTL-managed feeds will never refresh faster than that.
+
 # Testing
 
 ## Manually

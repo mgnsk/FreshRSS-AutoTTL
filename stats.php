@@ -124,28 +124,37 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $statsCount;
 
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount)
+    /**
+     * @var int
+     */
+    private $minTTL;
+
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0)
     {
         parent::__construct();
 
         $this->defaultTTL = $defaultTTL;
         $this->maxTTL = $maxTTL;
         $this->statsCount = $statsCount;
+        $this->minTTL = $minTTL;
     }
 
     public function calcAdjustedTTL(int $avgTTL): int
     {
         if ($this->defaultTTL > $this->maxTTL) {
-            return $this->defaultTTL;
-        }
-
-        if ($avgTTL <= 0 || $avgTTL > $this->maxTTL) {
-            return $this->maxTTL;
+            $result = $this->defaultTTL;
+        } elseif ($avgTTL <= 0 || $avgTTL > $this->maxTTL) {
+            $result = $this->maxTTL;
         } elseif ($avgTTL < $this->defaultTTL) {
-            return $this->defaultTTL;
+            $result = $this->defaultTTL;
+        } else {
+            $result = $avgTTL;
         }
 
-        return $avgTTL;
+        // FreshRSS itself never fetches a feed more often than its own hidden
+        // HTTP cache floor (limits.cache_duration), regardless of TTL, so AutoTTL's
+        // computed TTL must never claim to be shorter than that.
+        return max($result, $this->minTTL);
     }
 
     public function getAdjustedTTL(int $feedID, int $lastUpdate): int

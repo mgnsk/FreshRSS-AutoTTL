@@ -15,6 +15,8 @@ class AutoTTLExtension extends Minz_Extension
 
     public int $statsCount;
 
+    public int $minTTL;
+
     /**
      * @var AutoTTLStats
      */
@@ -33,6 +35,10 @@ class AutoTTLExtension extends Minz_Extension
         $this->defaultTTL = FreshRSS_Context::userConf()->attributeInt('ttl_default') ?? FreshRSS_Feed::TTL_DEFAULT;
         $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl') ?? self::MAX_TTL;
         $this->statsCount = FreshRSS_Context::userConf()->attributeInt('auto_ttl_stats_count') ?? self::STATS_COUNT;
+
+        // FreshRSS never actually fetches a feed more often than this, regardless
+        // of TTL, so AutoTTL's computed TTL must never claim to be shorter than it.
+        $this->minTTL = (int) (FreshRSS_Context::systemConf()->limits['cache_duration'] ?? 0);
     }
 
     /*
@@ -52,7 +58,7 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL);
         }
 
         return $this->stats;
