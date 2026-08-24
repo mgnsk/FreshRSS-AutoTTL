@@ -59,6 +59,12 @@
 	</div>
 </form>
 
+<p>
+	Detected cron interval:
+	<?= $this->cronIntervalEstimate > 0 ? '~' . $this->getStats()->humanIntervalFromSeconds($this->cronIntervalEstimate) : 'not yet detected' ?>
+	&mdash; AutoTTL learns this automatically from how often your update script actually runs, and never schedules a feed to check more often than it.
+</p>
+
 <?php
 $now = time();
 ?>
