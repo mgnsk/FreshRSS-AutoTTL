@@ -411,6 +411,64 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $baseTTL * 10, true, $maxTTL));
     }
 
+    public function test_cron_interval_estimator_first_observation_seeds_without_estimating(): void
+    {
+        $now = time();
+        $result = CronIntervalEstimator::updateEstimate($now, 0, 0);
+
+        // Nothing to compare the very first call against yet: just remember when it happened.
+        $this->assertSame(0, $result['estimate']);
+        $this->assertSame($now, $result['lastHookTs']);
+    }
+
+    public function test_cron_interval_estimator_ignores_intra_sweep_gap(): void
+    {
+        $now = time();
+        $lastHookTs = $now - (CronIntervalEstimator::MIN_SWEEP_GAP - 1);
+
+        // A gap just under the threshold looks like the next feed in the same sweep.
+        $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 1200);
+
+        $this->assertSame(1200, $result['estimate']);
+        $this->assertSame($lastHookTs, $result['lastHookTs']);
+    }
+
+    public function test_cron_interval_estimator_ratchets_up_on_bigger_gap(): void
+    {
+        $now = time();
+        $lastHookTs = $now - 7200;
+
+        // No prior estimate: a new-sweep gap is trusted immediately.
+        $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 0);
+
+        $this->assertSame(7200, $result['estimate']);
+        $this->assertSame($now, $result['lastHookTs']);
+    }
+
+    public function test_cron_interval_estimator_eases_down_on_smaller_gap(): void
+    {
+        $now = time();
+        $lastHookTs = $now - 600;
+
+        // A smaller new-sweep gap (cron sped up) blends in gradually rather than
+        // instantly undercutting backoff for erroring feeds.
+        $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 1200);
+
+        $this->assertSame((int) (0.7 * 1200 + 0.3 * 600), $result['estimate']);
+        $this->assertSame($now, $result['lastHookTs']);
+    }
+
+    public function test_cron_interval_estimator_treats_threshold_gap_as_new_sweep(): void
+    {
+        $now = time();
+        $lastHookTs = $now - CronIntervalEstimator::MIN_SWEEP_GAP;
+
+        $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 0);
+
+        $this->assertSame(CronIntervalEstimator::MIN_SWEEP_GAP, $result['estimate']);
+        $this->assertSame($now, $result['lastHookTs']);
+    }
+
     public function test_feed_before_actualize_throttles_recent_error(): void
     {
         $feed = null;
@@ -481,6 +539,90 @@ final class AutoTTLStatsTest extends TestCase
             if ($feed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed->id());
             }
+        }
+    }
+
+    public function test_feed_before_actualize_learns_and_respects_cron_interval_floor(): void
+    {
+        $feed = null;
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+
+            $now = time();
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', $now - 7200);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
+            FreshRSS_Context::userConf()->save();
+
+            $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
+            $metaInfo['path'] = dirname(__DIR__);
+            $ext = new AutoTTLExtension($metaInfo);
+            $ext->init();
+            $ext->defaultTTL = 3600;
+            // maxTTL below defaultTTL forces calcAdjustedTTL's escape hatch, so the
+            // pre-floor TTL is deterministically defaultTTL (3600s) regardless of
+            // the feed's actual entry timing.
+            $ext->maxTTL = 100;
+            $ext->minTTL = 0;
+
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+            $feedDAO->updateLastUpdate($feed->id(), $now - 5000);
+            $feed = $feedDAO->searchById($feed->id());
+
+            // The hook was last invoked 7200s ago (simulating the previous cron
+            // sweep), well past MIN_SWEEP_GAP, so this call should detect and
+            // learn a ~7200s cron interval. Without that floor, effective TTL
+            // would be defaultTTL (3600s) < 5000s elapsed, so the feed would be
+            // due; with the learned 7200s floor, it must stay throttled.
+            $result = $ext->feedBeforeActualizeHook($feed);
+            $this->assertNull($result);
+
+            // Allow a few seconds of slack: real wall-clock time elapses between
+            // capturing $now above and sampleCronInterval()'s own time() call
+            // inside the hook (DB writes, feed re-fetch), so this can't be exact.
+            $learnedEstimate = FreshRSS_Context::userConf()->attributeInt('auto_ttl_cron_interval_estimate');
+            $this->assertGreaterThanOrEqual(7200, $learnedEstimate);
+            $this->assertLessThanOrEqual(7210, $learnedEstimate);
+        } finally {
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
+            FreshRSS_Context::userConf()->save();
+        }
+    }
+
+    public function test_feed_before_actualize_cron_interval_floor_combines_with_min_ttl(): void
+    {
+        $feed = null;
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+
+            $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
+            $metaInfo['path'] = dirname(__DIR__);
+            $ext = new AutoTTLExtension($metaInfo);
+            $ext->init();
+            $ext->defaultTTL = 3600;
+            $ext->maxTTL = 100; // forces the escape hatch, same as above
+            $ext->minTTL = 4000; // larger than the learned cron interval below
+
+            $now = time();
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+            $feedDAO->updateLastUpdate($feed->id(), $now - 3800);
+            $feed = $feedDAO->searchById($feed->id());
+
+            // cronIntervalEstimate (1800s) is smaller than minTTL (4000s), so
+            // minTTL must win: 3800s elapsed < 4000s floor, still throttled.
+            $ext->cronIntervalEstimate = 1800;
+            $result = $ext->feedBeforeActualizeHook($feed);
+            $this->assertNull($result);
+        } finally {
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
+            FreshRSS_Context::userConf()->save();
         }
     }
 

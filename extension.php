@@ -17,6 +17,10 @@ class AutoTTLExtension extends Minz_Extension
 
     public int $minTTL;
 
+    public int $cronIntervalEstimate;
+
+    private int $cronLastHookTs;
+
     /**
      * @var AutoTTLStats
      */
@@ -39,6 +43,13 @@ class AutoTTLExtension extends Minz_Extension
         // FreshRSS never actually fetches a feed more often than this, regardless
         // of TTL, so AutoTTL's computed TTL must never claim to be shorter than it.
         $this->minTTL = (int) (FreshRSS_Context::systemConf()->limits['cache_duration'] ?? 0);
+
+        // Internal, self-learned floor: how often the cron/systemd timer running
+        // actualize_script.php actually sweeps this user's feeds. FreshRSS has no
+        // config value for this - it's timed from our own hook invocations, see
+        // sampleCronInterval().
+        $this->cronLastHookTs = FreshRSS_Context::userConf()->attributeInt('auto_ttl_cron_last_hook_ts') ?? 0;
+        $this->cronIntervalEstimate = FreshRSS_Context::userConf()->attributeInt('auto_ttl_cron_interval_estimate') ?? 0;
     }
 
     /*
@@ -58,10 +69,33 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL);
+            $floor = max($this->minTTL, $this->cronIntervalEstimate);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $floor);
         }
 
         return $this->stats;
+    }
+
+    /*
+     * Times this hook's own invocations to learn how often actualize_script.php
+     * actually sweeps this user's feeds, since FreshRSS exposes no config value
+     * for its own cron/systemd cadence. See CronIntervalEstimator for the logic.
+     */
+    private function sampleCronInterval(): void
+    {
+        $now = time();
+        $result = CronIntervalEstimator::updateEstimate($now, $this->cronLastHookTs, $this->cronIntervalEstimate);
+
+        if ($result['lastHookTs'] !== $this->cronLastHookTs) {
+            // Only touches disk when a new sweep was actually detected (or on
+            // this user's very first-ever sample) - not once per feed.
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', $result['lastHookTs']);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', $result['estimate']);
+            FreshRSS_Context::userConf()->save();
+        }
+
+        $this->cronLastHookTs = $result['lastHookTs'];
+        $this->cronIntervalEstimate = $result['estimate'];
     }
 
     public function getBackoffTTL(FreshRSS_Feed $feed, int $baseTTL): int
@@ -90,6 +124,8 @@ class AutoTTLExtension extends Minz_Extension
         ) {
             return $feed;
         }
+
+        $this->sampleCronInterval();
 
         $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         if ($lastAttempt === 0) {
