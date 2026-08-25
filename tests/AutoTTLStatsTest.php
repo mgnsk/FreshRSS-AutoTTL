@@ -103,14 +103,35 @@ final class AutoTTLStatsTest extends TestCase
         $now = time();
 
         // Last sweep 100s ago, cron every 900s: predicted sweeps are at
-        // now+800, now+1700, ... The raw TTL (defaultTTL, since avgTTL=1 is
-        // below it) would put the due time at now-400 - before the next
-        // predicted sweep - so the result must be pushed out to now+800.
+        // now-100, now+800, now+1700, ... The raw TTL (defaultTTL, since
+        // avgTTL=1 is below it) would put the due time at now+600 - in the gap
+        // between two sweeps - so the result must be pushed out to now+800.
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
+        $lastAttempt = $now - 3000;
+        $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
+
+        $this->assertSame(3800, $adjustedTTL);
+    }
+
+    public function test_calc_adjusted_ttl_does_not_defer_an_already_due_feed_past_the_current_sweep(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $now = time();
+
+        // Same 900s cron, but here the raw due time (now-400) is already behind
+        // the anchor, so the anchor's own sweep is the first one at or after it:
+        // the feed is due now and must snap to that sweep (now-100), never to
+        // the following one at now+800. sampleCronInterval() moves the anchor to
+        // now on every sweep, so deferring here would defer forever.
         $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
         $lastAttempt = $now - 4000;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
-        $this->assertSame(4800, $adjustedTTL);
+        $this->assertSame(3900, $adjustedTTL);
+        // feedBeforeActualizeHook()'s gate is `elapsed < ttl`, so this must not
+        // come out throttled.
+        $this->assertLessThanOrEqual($now - $lastAttempt, $adjustedTTL);
     }
 
     public function test_calc_adjusted_ttl_sweep_boundary_does_not_overshoot(): void
@@ -911,7 +932,7 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
-    public function test_feed_before_actualize_learns_and_respects_cron_interval_floor(): void
+    public function test_feed_before_actualize_learns_cron_interval_and_refreshes_an_overdue_feed(): void
     {
         $feed = null;
         try {
@@ -939,11 +960,14 @@ final class AutoTTLStatsTest extends TestCase
 
             // The hook was last invoked 7200s ago (simulating the previous cron
             // sweep), well past MIN_SWEEP_GAP, so this call should detect and
-            // learn a ~7200s cron interval. Without that floor, effective TTL
-            // would be defaultTTL (3600s) < 5000s elapsed, so the feed would be
-            // due; with the learned 7200s floor, it must stay throttled.
+            // learn a ~7200s cron interval. Learning it must not hold the feed
+            // back: 5000s have elapsed against a 3600s TTL, and this sweep is
+            // the first one at or after that due time, so the feed refreshes
+            // now. Snapping it forward to the *next* predicted sweep instead
+            // would repeat on every sweep and never let the feed refresh.
             $result = $ext->feedBeforeActualizeHook($feed);
-            $this->assertNull($result);
+            $this->assertNotNull($result);
+            $this->assertSame($feed->id(), $result->id());
 
             // Allow a few seconds of slack: real wall-clock time elapses between
             // capturing $now above and sampleCronInterval()'s own time() call
@@ -961,7 +985,7 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
-    public function test_feed_before_actualize_cron_interval_floor_combines_with_min_ttl(): void
+    public function test_feed_before_actualize_min_ttl_floor_holds_then_releases_with_learned_cron(): void
     {
         $feed = null;
         try {
@@ -977,16 +1001,25 @@ final class AutoTTLStatsTest extends TestCase
 
             $now = time();
             $feedDAO = FreshRSS_Factory::createFeedDao();
-            // 4200s elapsed: past the 4000s cache-duration floor alone, so without
-            // cron snapping this feed would be due. sampleCronInterval() (called by
-            // the hook below) sets cronLastHookTs to ~now, so the next predicted
-            // sweep is ~now+1800; that snapping must be what keeps this throttled.
+            $ext->cronIntervalEstimate = 1800;
+
+            // 3800s elapsed: short of the 4000s cache-duration floor, so the feed
+            // stays throttled and its due time snaps forward to the next predicted
+            // sweep (~now+1800).
+            $feedDAO->updateLastUpdate($feed->id(), $now - 3800);
+            $feed = $feedDAO->searchById($feed->id());
+            $this->assertNull($ext->feedBeforeActualizeHook($feed));
+
+            // 4200s elapsed: past the floor, and this sweep is the first one at or
+            // after the resulting due time, so the feed must refresh now. The cron
+            // interval only decides which sweep a due time lands on - it can never
+            // keep pushing an already-due feed to the sweep after the current one,
+            // which would repeat every sweep and stall the feed indefinitely.
             $feedDAO->updateLastUpdate($feed->id(), $now - 4200);
             $feed = $feedDAO->searchById($feed->id());
-
-            $ext->cronIntervalEstimate = 1800;
             $result = $ext->feedBeforeActualizeHook($feed);
-            $this->assertNull($result);
+            $this->assertNotNull($result);
+            $this->assertSame($feed->id(), $result->id());
         } finally {
             if ($feed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed->id());
@@ -1195,12 +1228,12 @@ final class AutoTTLStatsTest extends TestCase
         $cronIntervalEstimate = 900;
 
         $stats = new AutoTTLStats(3600, 86400, 100, 0, $cronLastHookTs, $cronIntervalEstimate);
-        $lastAttempt = $now - 4000;
+        $lastAttempt = $now - 3000;
 
         // baseTTL already lands exactly on the predicted sweep at now+800 (see
         // test_calc_adjusted_ttl_snaps_forward_to_next_predicted_sweep).
         $baseTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
-        $this->assertSame(4800, $baseTTL);
+        $this->assertSame(3800, $baseTTL);
 
         // Even a small amount of extra time on top has nowhere to land within the
         // current sweep - baseTTL already used it all up - so it must roll
@@ -1208,7 +1241,7 @@ final class AutoTTLStatsTest extends TestCase
         // in the gap between the two, which is what would leave the feed
         // showing "pending" again for that whole gap.
         $withExtra = $stats->snapToNextSweep($lastAttempt, $baseTTL + 50);
-        $this->assertSame(5700, $withExtra);
+        $this->assertSame(4700, $withExtra);
         $this->assertSame($cronLastHookTs + 2 * $cronIntervalEstimate, $lastAttempt + $withExtra);
     }
 
@@ -1231,5 +1264,60 @@ final class AutoTTLStatsTest extends TestCase
             $dueTime = $lastAttempt + $effectiveTTL;
             $this->assertSame(0, ($dueTime - $cronLastHookTs) % $cronIntervalEstimate, "misaligned for extra={$extra}");
         }
+    }
+
+    public function test_snap_to_next_sweep_never_defers_a_feed_that_is_already_due(): void
+    {
+        $now = time();
+        $cronIntervalEstimate = 900;
+
+        // cronLastHookTs == now is what sampleCronInterval() leaves behind at the
+        // start of every sweep. For any feed whose TTL has already elapsed, the
+        // snapped TTL must stay within the elapsed time - otherwise
+        // feedBeforeActualizeHook()'s `elapsed < ttl` gate skips a feed that is
+        // due, and skips it again on the next sweep, and so on forever.
+        $stats = new AutoTTLStats(3600, 86400, 100, 0, $now, $cronIntervalEstimate);
+
+        for ($overdueBy = 0; $overdueBy <= 3 * $cronIntervalEstimate; $overdueBy += 137) {
+            $ttl = 3600;
+            $lastAttempt = $now - $ttl - $overdueBy;
+
+            $this->assertLessThanOrEqual(
+                $now - $lastAttempt,
+                $stats->snapToNextSweep($lastAttempt, $ttl),
+                "deferred a feed overdue by {$overdueBy}s"
+            );
+        }
+    }
+
+    public function test_consecutive_sweeps_refresh_a_feed_on_its_own_ttl_cadence(): void
+    {
+        $defaultTTL = 3600;
+        $cronIntervalEstimate = 900;
+        $now = time();
+        $lastAttempt = $now - 4000;
+
+        // Replays feedBeforeActualizeHook()'s decision once per sweep, moving
+        // cronLastHookTs to each sweep's own time the way sampleCronInterval()
+        // does. The feed starts out overdue, so it must refresh on the very
+        // first sweep and then once per TTL (3600s = 4 sweeps of 900s).
+        // Previously every sweep re-snapped the due time one interval further
+        // out, so no sweep ever refreshed it while the displayed countdown
+        // restarted at one cron interval each time.
+        $refreshedAtSweeps = [];
+        for ($sweep = 0; $sweep < 12; $sweep++) {
+            $sweepTime = $now + $sweep * $cronIntervalEstimate;
+            $stats = new AutoTTLStats($defaultTTL, 86400, 100, 0, $sweepTime, $cronIntervalEstimate);
+
+            $ttl = $stats->calcAdjustedTTL(2100, $lastAttempt);
+            $effectiveTTL = $stats->snapToNextSweep($lastAttempt, $ttl);
+
+            if ($sweepTime - $lastAttempt >= $effectiveTTL) {
+                $refreshedAtSweeps[] = $sweep;
+                $lastAttempt = $sweepTime;
+            }
+        }
+
+        $this->assertSame([0, 4, 8], $refreshedAtSweeps);
     }
 }
