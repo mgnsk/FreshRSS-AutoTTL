@@ -26,6 +26,14 @@ AutoTTL reads this value from FreshRSS's system configuration and floors its own
 table and throttling decisions stay consistent with what FreshRSS will actually do. If `limits.cache_duration` is set
 higher than AutoTTL's own max TTL, AutoTTL-managed feeds will never refresh faster than that.
 
+# Interaction with cron/systemd timer frequency
+
+A feed can also only ever actually refresh when your `actualize_script.php` cron/systemd timer runs, however often
+that is. FreshRSS exposes no config value for this cadence, so AutoTTL learns it by timing its own hook's
+invocations across sweeps. Once learned, it rounds each feed's computed TTL forward to land on the next predicted
+sweep rather than sometime before it, so the "time until next update" shown on the stats page counts down to roughly
+zero right as your cron actually runs the feed, instead of sitting on "pending" for the remainder of the interval.
+
 # Testing
 
 ## Manually
