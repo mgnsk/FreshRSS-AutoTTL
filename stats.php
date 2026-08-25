@@ -139,10 +139,14 @@ class StatItem
         }
 
         if ($cronInterval > 0) {
-            $maxSweeps = max(1, intdiv($maxTTL, $cronInterval));
+            // Budget sweeps from the headroom remaining after baseTTL, not from
+            // maxTTL alone - otherwise a large baseTTL leaves no room and the
+            // result below can overshoot maxTTL.
+            $headroom = $maxTTL - $baseTTL;
+            $maxSweeps = $headroom > 0 ? max(1, intdiv($headroom, $cronInterval) + 1) : 1;
             $skipSweeps = self::calcSkipSweeps($feedId, $lastUpdate, $lastAttempt, $lastError, $cronInterval, $maxSweeps, $groupRank, $groupSize, $host);
 
-            return $baseTTL + ($skipSweeps - 1) * $cronInterval;
+            return max($baseTTL, min($maxTTL, $baseTTL + ($skipSweeps - 1) * $cronInterval));
         }
 
         $errorAge = $lastAttempt - $lastUpdate;
@@ -269,6 +273,13 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     public function snapToNextSweep(int $lastAttempt, int $ttl): int
     {
+        // lastAttempt <= 0 means "never attempted" (see calcLastAttempt()) - there
+        // is no real anchor to measure a predicted sweep against, so snapping would
+        // turn nextSweep's absolute timestamp into a nonsensical TTL.
+        if ($lastAttempt <= 0) {
+            return $ttl;
+        }
+
         $nextSweep = $this->predictedSweepAtOrAfter($lastAttempt + $ttl);
 
         return $nextSweep !== null ? $nextSweep - $lastAttempt : $ttl;

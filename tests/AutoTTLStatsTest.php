@@ -145,6 +145,21 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame(4000, $adjustedTTL);
     }
 
+    public function test_calc_adjusted_ttl_no_snapping_for_never_attempted_feed_even_with_learned_cron(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $now = time();
+
+        // lastAttempt defaults to 0 ("never attempted") - even with a learned
+        // cron interval, snapping must not turn the predicted sweep's absolute
+        // timestamp into a nonsensical TTL (see snapToNextSweep()).
+        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
+        $adjustedTTL = $stats->calcAdjustedTTL(1);
+
+        $this->assertSame($defaultTTL, $adjustedTTL);
+    }
+
     public function test_calc_adjusted_ttl_combines_min_ttl_floor_with_cron_snapping(): void
     {
         $defaultTTL = 3600;
@@ -695,8 +710,7 @@ final class AutoTTLStatsTest extends TestCase
     {
         $baseTTL = 3600;
         $cronInterval = 900;
-        $maxTTL = 86400; // exactly 96 sweeps
-        $maxSweeps = intdiv($maxTTL, $cronInterval);
+        $maxTTL = 86400;
 
         // Fresh error: backoffTTL is baseTTL plus a random 0..(MIN_SKIP_SWEEPS-1)
         // extra sweeps.
@@ -706,10 +720,26 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertLessThanOrEqual($baseTTL + (StatItem::MIN_SKIP_SWEEPS - 1) * $cronInterval, $backoffTTL);
         }
 
-        // Clamped at maxSweeps (maxTTL / cronInterval) however large errorAge grows.
+        // Clamped at maxTTL however large errorAge grows.
         for ($feedId = 1; $feedId <= 20; $feedId++) {
             $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, 0, $maxTTL * 10, 999, true, $maxTTL, $cronInterval);
-            $this->assertLessThanOrEqual($baseTTL + ($maxSweeps - 1) * $cronInterval, $backoffTTL);
+            $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
+        }
+    }
+
+    public function test_calc_backoff_ttl_cron_aware_never_exceeds_max_ttl_when_base_ttl_is_large(): void
+    {
+        // baseTTL close to maxTTL leaves little headroom for extra sweeps -
+        // budgeting maxSweeps from maxTTL alone (ignoring baseTTL) would let
+        // the result overshoot maxTTL.
+        $baseTTL = 80000;
+        $cronInterval = 900;
+        $maxTTL = 86400;
+
+        for ($feedId = 1; $feedId <= 20; $feedId++) {
+            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, 0, $maxTTL * 10, 999, true, $maxTTL, $cronInterval);
+            $this->assertGreaterThanOrEqual($baseTTL, $backoffTTL);
+            $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
         }
     }
 
@@ -838,6 +868,12 @@ final class AutoTTLStatsTest extends TestCase
             if ($feed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed->id());
             }
+            // feedBeforeActualizeHook() calls sampleCronInterval(), which persists
+            // to user config regardless of the instance-level pin above - reset it
+            // so later tests reading init()'s state aren't order-dependent.
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
+            FreshRSS_Context::userConf()->save();
         }
     }
 
@@ -1137,6 +1173,19 @@ final class AutoTTLStatsTest extends TestCase
 
         // No cronLastHookTs/cronIntervalEstimate: the value must pass through unchanged.
         $this->assertSame(4650, $stats->snapToNextSweep($now - 4000, 4650));
+    }
+
+    public function test_snap_to_next_sweep_is_noop_for_never_attempted_feed_even_with_learned_cron(): void
+    {
+        $now = time();
+
+        // lastAttempt <= 0 means "never attempted" (calcLastAttempt()) - there is
+        // no real anchor to snap against, so even with a learned cron interval the
+        // TTL must pass through unchanged rather than snapToNextSweep() returning
+        // an absolute predicted-sweep timestamp as if it were a TTL.
+        $stats = new AutoTTLStats(3600, 86400, 100, 0, $now - 100, 900);
+
+        $this->assertSame(4650, $stats->snapToNextSweep(0, 4650));
     }
 
     public function test_snap_to_next_sweep_pushes_extra_past_an_already_snapped_base_ttl_to_the_next_sweep(): void
