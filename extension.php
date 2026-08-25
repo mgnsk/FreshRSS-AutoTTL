@@ -19,7 +19,7 @@ class AutoTTLExtension extends Minz_Extension
 
     public int $cronIntervalEstimate;
 
-    private int $cronLastHookTs;
+    public int $cronLastHookTs;
 
     /**
      * @var AutoTTLStats
@@ -69,8 +69,7 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $floor = max($this->minTTL, $this->cronIntervalEstimate);
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $floor);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL, $this->cronLastHookTs, $this->cronIntervalEstimate);
         }
 
         return $this->stats;
@@ -103,14 +102,18 @@ class AutoTTLExtension extends Minz_Extension
         $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
 
-        return StatItem::calcBackoffTTL($baseTTL, $feed->lastUpdate(), $lastAttempt, $isErroring, $this->maxTTL);
-    }
+        // Only touches the host-group query when it can matter: an erroring
+        // feed under cron-aware backoff. A healthy sweep never pays for it.
+        $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
+        if ($isErroring && $this->cronIntervalEstimate > 0) {
+            $groupInfo = $this->getStats()->getGroupInfoForFeed($feed->id());
+        }
 
-    public function getErrorJitter(FreshRSS_Feed $feed, int $backoffTTL): int
-    {
-        $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
-
-        return StatItem::calcErrorJitter($feed->id(), $backoffTTL, $feed->lastError(), $isErroring);
+        return StatItem::calcBackoffTTL(
+            $baseTTL, $feed->id(), $feed->lastUpdate(), $lastAttempt, $feed->lastError(),
+            $isErroring, $this->maxTTL, $this->cronIntervalEstimate,
+            $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']
+        );
     }
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
@@ -155,20 +158,23 @@ class AutoTTLExtension extends Minz_Extension
         $timeSinceLastAttempt = time() - $lastAttempt;
         $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
         $backoffTTL = $this->getBackoffTTL($feed, $ttl);
-        $jitter = $this->getErrorJitter($feed, $backoffTTL);
-        $effectiveTTL = $backoffTTL + $jitter;
+        // $ttl already lands on a predicted cron sweep, and so does $backoffTTL
+        // when the cron interval is known - but the bootstrap backoff
+        // formula (interval not yet learned) doesn't; re-snap so the gate below
+        // always resolves at an actual sweep instead of sometime in the gap
+        // before the next one.
+        $effectiveTTL = $this->getStats()->snapToNextSweep($lastAttempt, $backoffTTL);
 
         if ($timeSinceLastAttempt < $effectiveTTL) {
             Minz_Log::debug(
                 sprintf(
-                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds = %ds TTL + %ds backoff + %ds jitter) not exceeded yet',
+                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds, from %ds TTL + %ds backoff) not exceeded yet',
                     $feed->id(),
                     $feed->name(),
                     date('r', $lastAttempt),
                     $effectiveTTL,
                     $ttl,
                     $backoffTTL - $ttl,
-                    $jitter,
                 )
             );
 

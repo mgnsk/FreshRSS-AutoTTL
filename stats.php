@@ -6,9 +6,11 @@ class StatItem
     // whose error state predates the _feed.error column becoming a BIGINT timestamp.
     public const LEGACY_ERROR_SENTINEL = 1;
 
-    // Jitter is a fraction of backoffTTL rather than an absolute value, so it scales
-    // with the wait instead of dwarfing short TTLs or being negligible on long ones.
-    public const JITTER_FRACTION = 0.25;
+    // Minimum size of the random skip range, in sweeps, even on a feed's very
+    // first error. Without this floor, a fresh error's range would start at 1
+    // sweep with no randomness at all - exactly the case that matters most for
+    // a shared rate-limit event hitting many feeds in the same sweep.
+    public const MIN_SKIP_SWEEPS = 4;
 
     public int $id;
 
@@ -26,13 +28,11 @@ class StatItem
 
     public int $backoffTTL;
 
-    public int $errorJitter;
-
     public int $ttl;
 
     public int $avgTTL;
 
-    public function __construct(array $feed, int $baseTTL, int $maxTTL)
+    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, int $groupRank = 0, int $groupSize = 1, string $host = '')
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
@@ -41,24 +41,51 @@ class StatItem
         $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
         $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
         $this->baseTTL = $baseTTL;
-        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->lastUpdate, $this->lastAttempt, $this->isErroring, $maxTTL);
-        $this->errorJitter = self::calcErrorJitter($this->id, $this->backoffTTL, $this->lastError, $this->isErroring);
+        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->id, $this->lastUpdate, $this->lastAttempt, $this->lastError, $this->isErroring, $maxTTL, $cronIntervalEstimate, $groupRank, $groupSize, $host);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
     }
 
-    public static function calcErrorJitter(int $feedId, int $backoffTTL, int $lastError, bool $isErroring): int
+    /*
+     * Random number of sweeps (>= 1) an erroring feed skips beyond baseTTL's own
+     * sweep, deterministic per feed+lastError - stable across repeated hook calls
+     * within the same error episode, but reshuffled whenever the feed errors again.
+     *
+     * The random range grows with how long the feed has been failing (errorAge in
+     * whole sweeps), clamped to maxSweeps, so a feed that keeps failing gets both a
+     * wider possible spread and a longer expected wait over time, without needing
+     * to persist an attempt counter. MIN_SKIP_SWEEPS floors the range even on a
+     * fresh error, and maxSweeps caps it even when MIN_SKIP_SWEEPS would otherwise
+     * exceed it (a coarse cron relative to maxTTL) - either way, skip never exceeds
+     * maxSweeps, preserving the same eventual-retry guarantee maxTTL provides today.
+     *
+     * groupRank/groupSize/host coordinate feeds sharing a host (e.g. many YouTube
+     * channel feeds erroring together on a rate limit): when groupSize > 1, the
+     * range is bumped to fit the whole group and each member's rank claims a
+     * distinct slot, instead of leaving dispersal to independent hash luck - see
+     * AutoTTLStats::getErrorHostGroups(). groupSize <= 1 (lone feed, or a feed
+     * whose URL host couldn't be determined) falls back to the plain per-feed hash.
+     */
+    public static function calcSkipSweeps(int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, int $cronInterval, int $maxSweeps, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
     {
-        if (!$isErroring) {
-            return 0;
+        $errorAge = $lastAttempt - $lastUpdate;
+        $range = min($maxSweeps, max(self::MIN_SKIP_SWEEPS, intdiv($errorAge, $cronInterval)));
+        $range = max(1, $range);
+
+        if ($groupSize <= 1) {
+            return 1 + (int) (abs(crc32($feedId . '_' . $lastError)) % $range);
         }
 
-        $jitterMax = (int) ($backoffTTL * self::JITTER_FRACTION);
-        if ($jitterMax <= 0) {
-            return 0;
-        }
+        // Bump the range so a large simultaneous group actually gets enough
+        // distinct slots to spread into, still capped at maxSweeps.
+        $range = min($maxSweeps, max($range, $groupSize));
 
-        return (int) (abs(crc32($feedId . '_' . $lastError)) % $jitterMax);
+        // Distinct per-host offset so different host groups don't all default
+        // to slot 0 for their rank-0 member.
+        $hostOffset = (int) (abs(crc32($host)) % $range);
+        $slot = ($groupRank + $hostOffset) % $range;
+
+        return 1 + $slot;
     }
 
     /*
@@ -85,20 +112,37 @@ class StatItem
     }
 
     /*
-     * TTL to apply to a feed that keeps erroring, growing with how long it's been
-     * failing (lastAttempt - lastUpdate). Since each retry only happens after
-     * waiting backoffTTL, errorAge roughly doubles each pass once it exceeds
-     * baseTTL, producing exponential backoff bounded by maxTTL without needing
-     * to persist an attempt counter.
+     * TTL to apply to a feed that keeps erroring.
+     *
+     * When cronInterval > 0 (cron cadence learned), the feed randomly skips a
+     * growing number of cron sweeps via calcSkipSweeps() - see there for why the
+     * skip is randomized rather than a fixed doubling schedule. backoffTTL always
+     * lands on a real predicted sweep by construction, so snapToNextSweep() has
+     * nothing left to correct once the cron interval is known.
+     *
+     * When cronInterval == 0 (not learned yet), falls back to a bootstrap
+     * seconds-based formula: since each retry only happens after waiting
+     * backoffTTL, errorAge roughly doubles each pass once it exceeds baseTTL,
+     * producing exponential backoff bounded by maxTTL without needing to persist
+     * an attempt counter. No per-feed randomization is available yet at this
+     * stage (see calcSkipSweeps) - this is a short bootstrap window before the
+     * cron cadence is learned, not a steady-state throttling strategy.
      *
      * Never returns less than baseTTL, even if baseTTL itself exceeds maxTTL
      * (calcAdjustedTTL's defaultTTL > maxTTL escape hatch) - an errored feed
      * must never be checked more eagerly than a healthy one.
      */
-    public static function calcBackoffTTL(int $baseTTL, int $lastUpdate, int $lastAttempt, bool $isErroring, int $maxTTL): int
+    public static function calcBackoffTTL(int $baseTTL, int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, bool $isErroring, int $maxTTL, int $cronInterval = 0, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
     {
         if (!$isErroring) {
             return $baseTTL;
+        }
+
+        if ($cronInterval > 0) {
+            $maxSweeps = max(1, intdiv($maxTTL, $cronInterval));
+            $skipSweeps = self::calcSkipSweeps($feedId, $lastUpdate, $lastAttempt, $lastError, $cronInterval, $maxSweeps, $groupRank, $groupSize, $host);
+
+            return $baseTTL + ($skipSweeps - 1) * $cronInterval;
         }
 
         $errorAge = $lastAttempt - $lastUpdate;
@@ -164,7 +208,22 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $minTTL;
 
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0)
+    /**
+     * @var int
+     */
+    private $cronLastHookTs;
+
+    /**
+     * @var int
+     */
+    private $cronIntervalEstimate;
+
+    /**
+     * @var ?array<int, array{rank: int, size: int, host: string}>
+     */
+    private $errorHostGroups = null;
+
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0, int $cronLastHookTs = 0, int $cronIntervalEstimate = 0)
     {
         parent::__construct();
 
@@ -172,9 +231,11 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->maxTTL = $maxTTL;
         $this->statsCount = $statsCount;
         $this->minTTL = $minTTL;
+        $this->cronLastHookTs = $cronLastHookTs;
+        $this->cronIntervalEstimate = $cronIntervalEstimate;
     }
 
-    public function calcAdjustedTTL(int $avgTTL): int
+    public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0): int
     {
         if ($this->defaultTTL > $this->maxTTL) {
             $result = $this->defaultTTL;
@@ -189,7 +250,46 @@ class AutoTTLStats extends Minz_ModelPdo
         // FreshRSS itself never fetches a feed more often than its own hidden
         // HTTP cache floor (limits.cache_duration), regardless of TTL, so AutoTTL's
         // computed TTL must never claim to be shorter than that.
-        return max($result, $this->minTTL);
+        $result = max($result, $this->minTTL);
+
+        return $this->snapToNextSweep($lastAttempt, $result);
+    }
+
+    /*
+     * Rounds a TTL forward so lastAttempt + ttl lands on the next actual cron
+     * sweep at or after where it would otherwise fall, instead of sometime
+     * before it - which is what leaves a feed sitting on "pending" for the
+     * rest of the interval. A no-op (returns $ttl unchanged) when the cron
+     * cadence hasn't been learned yet - see sampleCronInterval().
+     *
+     * Public so callers combining calcAdjustedTTL()'s result with further TTL
+     * adjustments - namely the bootstrap error backoff formula - can
+     * re-snap the final total the same way, since it can push lastAttempt + ttl
+     * past the sweep boundary calcAdjustedTTL() already snapped it to.
+     */
+    public function snapToNextSweep(int $lastAttempt, int $ttl): int
+    {
+        $nextSweep = $this->predictedSweepAtOrAfter($lastAttempt + $ttl);
+
+        return $nextSweep !== null ? $nextSweep - $lastAttempt : $ttl;
+    }
+
+    /*
+     * Smallest cronLastHookTs + n*cronIntervalEstimate (n >= 1) that is >= targetTime.
+     * Null when the cron cadence hasn't been learned yet - see sampleCronInterval().
+     */
+    private function predictedSweepAtOrAfter(int $targetTime): ?int
+    {
+        if ($this->cronIntervalEstimate <= 0 || $this->cronLastHookTs <= 0) {
+            return null;
+        }
+
+        $diff = $targetTime - $this->cronLastHookTs;
+        $sweepsAhead = $diff <= 0
+            ? 1
+            : intdiv($diff + $this->cronIntervalEstimate - 1, $this->cronIntervalEstimate);
+
+        return $this->cronLastHookTs + $sweepsAhead * $this->cronIntervalEstimate;
     }
 
     public function getAdjustedTTL(int $feedID, int $lastUpdate): int
@@ -205,14 +305,78 @@ SQL;
         if ($stm !== false) {
             $res = $stm->fetch(PDO::FETCH_NAMED);
             if ($res !== false) {
-                return $this->calcAdjustedTTL((int) $res['avgTTL']);
+                return $this->calcAdjustedTTL((int) $res['avgTTL'], $lastUpdate);
             }
         }
 
         $info = $stm === false ? $this->pdo->errorInfo() : $stm->errorInfo();
         Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($info));
 
-        return $this->calcAdjustedTTL(0);
+        return $this->calcAdjustedTTL(0, $lastUpdate);
+    }
+
+    /*
+     * Groups currently-erroring, AutoTTL-managed feeds by their URL's exact
+     * hostname, so calcSkipSweeps() can hand out distinct sweep slots to feeds
+     * sharing a rate-limited host instead of relying on independent hash luck.
+     * Computed lazily and memoized for the lifetime of this instance - i.e. once
+     * per sweep, since AutoTTLExtension::getStats() reuses a single instance
+     * across all feeds in a request - and only queried at all once something
+     * actually calls getGroupInfoForFeed().
+     *
+     * Feeds still on the legacy error sentinel (no real error timestamp) are
+     * excluded; they fall back to the ungrouped per-feed hash, same as feeds
+     * whose URL host can't be determined (each gets its own singleton group,
+     * keyed by feed id so it can never collide with a real hostname).
+     *
+     * @return array<int, array{rank: int, size: int, host: string}>
+     */
+    private function getErrorHostGroups(): array
+    {
+        if ($this->errorHostGroups !== null) {
+            return $this->errorHostGroups;
+        }
+        $this->errorHostGroups = [];
+
+        $sql = <<<SQL
+SELECT feed.id, feed.url
+FROM `_feed` AS feed
+WHERE feed.ttl = 0 AND feed.error > 1 AND feed.error > feed.`lastUpdate`
+SQL;
+
+        $stm = $this->pdo->query($sql);
+        if ($stm === false) {
+            Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($this->pdo->errorInfo()));
+
+            return $this->errorHostGroups;
+        }
+
+        $byGroupKey = [];
+        foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $row) {
+            $feedId = (int) $row['id'];
+            $host = parse_url((string) $row['url'], PHP_URL_HOST);
+            $groupKey = (is_string($host) && $host !== '') ? strtolower($host) : ('#feed:' . $feedId);
+            $byGroupKey[$groupKey][] = $feedId;
+        }
+
+        foreach ($byGroupKey as $groupKey => $feedIds) {
+            sort($feedIds); // stable ascending rank
+            $size = count($feedIds);
+            $host = str_starts_with($groupKey, '#feed:') ? '' : $groupKey;
+            foreach ($feedIds as $rank => $feedId) {
+                $this->errorHostGroups[$feedId] = ['rank' => $rank, 'size' => $size, 'host' => $host];
+            }
+        }
+
+        return $this->errorHostGroups;
+    }
+
+    /**
+     * @return array{rank: int, size: int, host: string}
+     */
+    public function getGroupInfoForFeed(int $feedId): array
+    {
+        return $this->getErrorHostGroups()[$feedId] ?? ['rank' => 0, 'size' => 1, 'host' => ''];
     }
 
     public function getFeedStats(bool $usesAutoTTL): array
@@ -254,8 +418,16 @@ SQL;
         if ($stm !== false) {
             $list = [];
             foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $feed) {
-                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL']);
-                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL);
+                $lastAttemptTs = StatItem::calcLastAttempt((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
+                $isErroring = StatItem::calcIsErroring((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
+                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $lastAttemptTs);
+
+                $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
+                if ($isErroring && $this->cronIntervalEstimate > 0) {
+                    $groupInfo = $this->getGroupInfoForFeed((int) $feed['id']);
+                }
+
+                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL, $this->cronIntervalEstimate, $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']);
             }
 
             return $list;
@@ -279,20 +451,21 @@ SQL;
             : 'never';
     }
 
-    public function formatTimeUntilNextUpdate(StatItem $feed, int $ttl, int $now, bool $includeJitter): string
+    public function formatTimeUntilNextUpdate(StatItem $feed, int $ttl, int $now): string
     {
         if ($feed->lastAttempt === 0) {
             return 'never attempted';
         }
 
-        $jitter = $includeJitter ? $feed->errorJitter : 0;
-        $timeUntil = $feed->lastAttempt + $ttl + $jitter - $now;
+        // $ttl already lands on a predicted sweep when the cron interval is known
+        // (calcAdjustedTTL()/calcBackoffTTL() both snap by construction), but the
+        // bootstrap backoff formula (cron interval not yet learned) doesn't;
+        // re-snap so the displayed countdown always reaches zero on an actual
+        // sweep, matching what feedBeforeActualizeHook() does with the same value.
+        $effectiveTTL = $this->snapToNextSweep($feed->lastAttempt, $ttl);
+        $timeUntil = $feed->lastAttempt + $effectiveTTL - $now;
 
-        $suffix = '';
-        if ($feed->isErroring) {
-            $jitterText = $jitter > 0 ? ', +' . self::humanIntervalFromSeconds($jitter) . ' jitter' : '';
-            $suffix = ' (in error' . $jitterText . ')';
-        }
+        $suffix = $feed->isErroring ? ' (in error)' : '';
 
         return ($timeUntil > 0 ? self::humanIntervalFromSeconds($timeUntil) : 'pending') . $suffix;
     }
