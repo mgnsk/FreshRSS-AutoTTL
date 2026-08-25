@@ -260,11 +260,15 @@ class AutoTTLStats extends Minz_ModelPdo
     }
 
     /*
-     * Rounds a TTL forward so lastAttempt + ttl lands on the next actual cron
+     * Rounds a TTL forward so lastAttempt + ttl lands on the actual cron
      * sweep at or after where it would otherwise fall, instead of sometime
      * before it - which is what leaves a feed sitting on "pending" for the
      * rest of the interval. A no-op (returns $ttl unchanged) when the cron
      * cadence hasn't been learned yet - see sampleCronInterval().
+     *
+     * "At or after" includes the sweep the anchor itself points at: an
+     * already-due feed must resolve to that one, never to the following one -
+     * see predictedSweepAtOrAfter().
      *
      * Public so callers combining calcAdjustedTTL()'s result with further TTL
      * adjustments - namely the bootstrap error backoff formula - can
@@ -286,8 +290,16 @@ class AutoTTLStats extends Minz_ModelPdo
     }
 
     /*
-     * Smallest cronLastHookTs + n*cronIntervalEstimate (n >= 1) that is >= targetTime.
+     * Smallest cronLastHookTs + n*cronIntervalEstimate (n >= 0) that is >= targetTime.
      * Null when the cron cadence hasn't been learned yet - see sampleCronInterval().
+     *
+     * n = 0 (the anchor sweep itself) is essential, not an edge case:
+     * sampleCronInterval() moves cronLastHookTs to now at the start of every
+     * sweep, so a feed that is already due has its target behind the anchor.
+     * Forcing n >= 1 there would answer "the sweep after this one" every single
+     * time, pushing the due time a full interval into the future on each sweep -
+     * a treadmill the feed can never reach, leaving it never refreshed while its
+     * displayed countdown restarts at one cron interval after every sweep.
      */
     private function predictedSweepAtOrAfter(int $targetTime): ?int
     {
@@ -297,7 +309,7 @@ class AutoTTLStats extends Minz_ModelPdo
 
         $diff = $targetTime - $this->cronLastHookTs;
         $sweepsAhead = $diff <= 0
-            ? 1
+            ? 0
             : intdiv($diff + $this->cronIntervalEstimate - 1, $this->cronIntervalEstimate);
 
         return $this->cronLastHookTs + $sweepsAhead * $this->cronIntervalEstimate;
