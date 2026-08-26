@@ -1,0 +1,6 @@
+#freshrss-autottl-configure .table-wrapper th,
+#freshrss-autottl-configure .table-wrapper td {
+	white-space: normal;
+	overflow-wrap: break-word;
+	text-align: left;
+}

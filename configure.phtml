@@ -1,4 +1,21 @@
 <div id="freshrss-autottl-configure" data-refresh-url="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>&amp;ajax=1">
+	<?php
+		/* FreshRSS opens this page inside its #slider panel via an AJAX fetch
+		   that only copies response.body.innerHTML into the DOM (see
+		   open_slider_listener() in FreshRSS's extra.js) - any <head>-level
+		   <link>/<style> never survives that. Same goes for configure.js's own
+		   partial refresh. The stylesheet must be linked from within the markup
+		   itself so it travels along with every fetch path.
+
+		   This must be an external stylesheet, not an inline <style> block:
+		   deployments that send a Content-Security-Policy without
+		   'unsafe-inline' in style-src (common in hardened Docker images)
+		   silently block inline <style>/style="" with no visible effect on the
+		   page, only a console warning - but still allow same-origin <link>
+		   stylesheets, which is how FreshRSS's own theme CSS survives the same
+		   CSP. */
+	?>
+	<link rel="stylesheet" href="<?= $this->getFileUrl('configure.css') ?>" />
 	<form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
 		<input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
 		<div class="form-group">
