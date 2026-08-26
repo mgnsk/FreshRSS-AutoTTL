@@ -32,7 +32,9 @@ class StatItem
 
     public int $avgTTL;
 
-    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, int $groupRank = 0, int $groupSize = 1, string $host = '')
+    public bool $backoffEnabled;
+
+    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, int $groupRank = 0, int $groupSize = 1, string $host = '', bool $backoffEnabled = true)
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
@@ -41,7 +43,8 @@ class StatItem
         $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
         $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
         $this->baseTTL = $baseTTL;
-        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->id, $this->lastUpdate, $this->lastAttempt, $this->lastError, $this->isErroring, $maxTTL, $cronIntervalEstimate, $groupRank, $groupSize, $host);
+        $this->backoffEnabled = $backoffEnabled;
+        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->id, $this->lastUpdate, $this->lastAttempt, $this->lastError, $this->isErroring, $maxTTL, $cronIntervalEstimate, $groupRank, $groupSize, $host, $backoffEnabled);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
     }
@@ -131,10 +134,14 @@ class StatItem
      * Never returns less than baseTTL, even if baseTTL itself exceeds maxTTL
      * (calcAdjustedTTL's defaultTTL > maxTTL escape hatch) - an errored feed
      * must never be checked more eagerly than a healthy one.
+     *
+     * backoffEnabled lets a feed be opted out of back-off entirely (per-feed
+     * exclusion list, see AutoTTLExtension::$backoffExcludedFeeds) - it then
+     * always returns baseTTL, same as a non-erroring feed.
      */
-    public static function calcBackoffTTL(int $baseTTL, int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, bool $isErroring, int $maxTTL, int $cronInterval = 0, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
+    public static function calcBackoffTTL(int $baseTTL, int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, bool $isErroring, int $maxTTL, int $cronInterval = 0, int $groupRank = 0, int $groupSize = 1, string $host = '', bool $backoffEnabled = true): int
     {
-        if (!$isErroring) {
+        if (!$backoffEnabled || !$isErroring) {
             return $baseTTL;
         }
 
@@ -227,7 +234,15 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $errorHostGroups = null;
 
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0, int $cronLastHookTs = 0, int $cronIntervalEstimate = 0)
+    /**
+     * @var array<int, int>
+     */
+    private $backoffExcludedFeeds;
+
+    /**
+     * @param array<int, int> $backoffExcludedFeeds Feed ids excluded from error back-off - see AutoTTLExtension::$backoffExcludedFeeds.
+     */
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0, int $cronLastHookTs = 0, int $cronIntervalEstimate = 0, array $backoffExcludedFeeds = [])
     {
         parent::__construct();
 
@@ -237,6 +252,12 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->minTTL = $minTTL;
         $this->cronLastHookTs = $cronLastHookTs;
         $this->cronIntervalEstimate = $cronIntervalEstimate;
+        $this->backoffExcludedFeeds = $backoffExcludedFeeds;
+    }
+
+    private function isBackoffExcluded(int $feedId): bool
+    {
+        return in_array($feedId, $this->backoffExcludedFeeds, true);
     }
 
     public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0): int
@@ -367,6 +388,14 @@ FROM `_feed` AS feed
 WHERE feed.ttl = 0 AND feed.error > 1 AND feed.error > feed.`lastUpdate`
 SQL;
 
+        if ($this->backoffExcludedFeeds !== []) {
+            // Excluded feeds don't back off at all, so they shouldn't consume or
+            // skew a group slot meant for feeds actually spreading out a shared
+            // rate-limit event - see calcSkipSweeps().
+            $excludedIds = implode(',', array_map('intval', $this->backoffExcludedFeeds));
+            $sql .= " AND feed.id NOT IN ({$excludedIds})";
+        }
+
         $stm = $this->pdo->query($sql);
         if ($stm === false) {
             Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($this->pdo->errorInfo()));
@@ -444,13 +473,14 @@ SQL;
                 $lastAttemptTs = StatItem::calcLastAttempt((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
                 $isErroring = StatItem::calcIsErroring((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
                 $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $lastAttemptTs);
+                $backoffEnabled = !$this->isBackoffExcluded((int) $feed['id']);
 
                 $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
-                if ($isErroring && $this->cronIntervalEstimate > 0) {
+                if ($isErroring && $backoffEnabled && $this->cronIntervalEstimate > 0) {
                     $groupInfo = $this->getGroupInfoForFeed((int) $feed['id']);
                 }
 
-                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL, $this->cronIntervalEstimate, $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']);
+                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL, $this->cronIntervalEstimate, $groupInfo['rank'], $groupInfo['size'], $groupInfo['host'], $backoffEnabled);
             }
 
             return $list;

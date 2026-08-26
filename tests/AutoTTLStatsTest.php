@@ -416,6 +416,62 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
+    public function test_get_feed_stats_respects_backoff_excluded_feeds(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        $excludedFeed = null;
+        $normalErroringFeed = null;
+        try {
+            $excludedFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+            $normalErroringFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+            // Captured after both fetches; see test_get_avg_ttl_three_per_day for why.
+            $now = time();
+
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+
+            $feedDAO->updateLastUpdate($excludedFeed->id(), $now - 86400);
+            $feedDAO->updateLastError($excludedFeed->id(), $now - 600);
+
+            // Same deterministic offsets as
+            // test_feed_before_actualize_backoff_excluded_feed_ignores_error_backoff:
+            // lastAttempt = $now - 115200 pins baseTTL to 28800s (see
+            // test_get_avg_two_close), and errorAge = 150000s pushes the
+            // bootstrap backoff formula (cronInterval == 0) well above it,
+            // clamped at maxTTL (86400s) - either way, strictly above baseTTL.
+            $lastErrorTs = $now - 115200;
+            $lastUpdateTs = $lastErrorTs - 150000;
+            $feedDAO->updateLastUpdate($normalErroringFeed->id(), $lastUpdateTs);
+            $feedDAO->updateLastError($normalErroringFeed->id(), $lastErrorTs);
+
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, 0, 0, [$excludedFeed->id()]);
+
+            $items = $stats->getFeedStats(true);
+            $byId = [];
+            foreach ($items as $item) {
+                $byId[$item->id] = $item;
+            }
+
+            // Excluded feed is still erroring, but back-off must not apply: its
+            // effective TTL stays at baseTTL, matching a healthy feed's behavior.
+            $this->assertTrue($byId[$excludedFeed->id()]->isErroring);
+            $this->assertFalse($byId[$excludedFeed->id()]->backoffEnabled);
+            $this->assertSame($byId[$excludedFeed->id()]->baseTTL, $byId[$excludedFeed->id()]->backoffTTL);
+
+            // A sibling erroring feed not in the exclusion list still backs off.
+            $this->assertTrue($byId[$normalErroringFeed->id()]->isErroring);
+            $this->assertTrue($byId[$normalErroringFeed->id()]->backoffEnabled);
+            $this->assertGreaterThan($byId[$normalErroringFeed->id()]->baseTTL, $byId[$normalErroringFeed->id()]->backoffTTL);
+        } finally {
+            foreach ([$excludedFeed, $normalErroringFeed] as $feed) {
+                if ($feed !== null) {
+                    FreshRSS_feed_Controller::deleteFeed($feed->id());
+                }
+            }
+        }
+    }
+
     public function test_get_group_info_for_feed_groups_by_exact_host(): void
     {
         $defaultTTL = 3600;
@@ -464,6 +520,51 @@ final class AutoTTLStatsTest extends TestCase
             $this->assertSame('', $customInfo['host']);
         } finally {
             foreach ([$feed1, $feed2, $feed3, $customTTLFeed] as $feed) {
+                if ($feed !== null) {
+                    FreshRSS_feed_Controller::deleteFeed($feed->id());
+                }
+            }
+        }
+    }
+
+    public function test_get_group_info_excludes_backoff_excluded_feeds(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+
+        $feed1 = null;
+        $feed2 = null;
+        $feed3 = null;
+        try {
+            $feed1 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+            $feed2 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+            $feed3 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
+
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+            $now = time();
+
+            foreach ([$feed1, $feed2, $feed3] as $feed) {
+                $feedDAO->updateLastUpdate($feed->id(), $now - 86400);
+                $feedDAO->updateLastError($feed->id(), $now - 600);
+            }
+
+            // Exclude feed3 from back-off: it must drop out of the shared-host
+            // group entirely (not just have its own back-off disabled), so it
+            // doesn't consume/skew a slot meant for feed1/feed2.
+            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, 0, 0, [$feed3->id()]);
+
+            $info1 = $stats->getGroupInfoForFeed($feed1->id());
+            $info2 = $stats->getGroupInfoForFeed($feed2->id());
+            $info3 = $stats->getGroupInfoForFeed($feed3->id());
+
+            $this->assertSame(2, $info1['size']);
+            $this->assertSame(2, $info2['size']);
+
+            // Excluded feed isn't in the group query at all - ungrouped default.
+            $this->assertSame(1, $info3['size']);
+            $this->assertSame('', $info3['host']);
+        } finally {
+            foreach ([$feed1, $feed2, $feed3] as $feed) {
                 if ($feed !== null) {
                     FreshRSS_feed_Controller::deleteFeed($feed->id());
                 }
@@ -563,6 +664,27 @@ final class AutoTTLStatsTest extends TestCase
 
         // Clamped at maxTTL however large errorAge grows.
         $this->assertSame($maxTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL));
+    }
+
+    public function test_calc_backoff_ttl_disabled_returns_base_ttl(): void
+    {
+        // backoffEnabled = false must behave exactly like a non-erroring feed:
+        // baseTTL regardless of error age or cron interval - see issue #50.
+        $baseTTL = 3600;
+        $maxTTL = 86400;
+        $lastUpdate = 0;
+        $feedId = 1;
+
+        $this->assertSame(
+            $baseTTL,
+            StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL, 0, 0, 1, '', false)
+        );
+
+        // Also holds on the cron-aware path (cronInterval > 0).
+        $this->assertSame(
+            $baseTTL,
+            StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL, 1800, 0, 1, '', false)
+        );
     }
 
     public function test_calc_backoff_ttl_legacy_fallback_is_deterministic_without_cron_interval(): void
@@ -892,6 +1014,62 @@ final class AutoTTLStatsTest extends TestCase
             // feedBeforeActualizeHook() calls sampleCronInterval(), which persists
             // to user config regardless of the instance-level pin above - reset it
             // so later tests reading init()'s state aren't order-dependent.
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
+            FreshRSS_Context::userConf()->save();
+        }
+    }
+
+    public function test_feed_before_actualize_backoff_excluded_feed_ignores_error_backoff(): void
+    {
+        $feed = null;
+        try {
+            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
+            // Captured after the fetch so it's always >= wiremock's own "now" used
+            // to render the feed's entry dates (2 entries, 2 days ago and 2 days
+            // ago + 2 seconds); see test_get_avg_ttl_three_per_day for why.
+            $now = time();
+
+            $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
+            $metaInfo['path'] = dirname(__DIR__);
+            $ext = new AutoTTLExtension($metaInfo);
+            $ext->init();
+            $ext->defaultTTL = 3600;
+            $ext->maxTTL = 200000;
+            $ext->cronLastHookTs = 0;
+            $ext->cronIntervalEstimate = 0;
+
+            $feedDAO = FreshRSS_Factory::createFeedDao();
+
+            // Anchor lastAttempt (= lastError, since it's set after lastUpdate
+            // below) at $now - 115200: same cutoff test_get_avg_two_close() uses
+            // to deterministically get avgTTL/baseTTL = 28800s from this fixture.
+            $lastErrorTs = $now - 115200;
+            // errorAge = lastError - lastUpdate = 150000s, which lands the
+            // bootstrap backoff formula (cronInterval == 0) at backoffTTL =
+            // errorAge = 150000s (baseTTL <= errorAge <= maxTTL).
+            $lastUpdateTs = $lastErrorTs - 150000;
+
+            $feedDAO->updateLastUpdate($feed->id(), $lastUpdateTs);
+            $feedDAO->updateLastError($feed->id(), $lastErrorTs);
+            $feed = $feedDAO->searchById($feed->id());
+
+            // Elapsed since lastAttempt is ~115200s: greater than baseTTL
+            // (28800s) but less than backoffTTL (150000s). With back-off
+            // enabled, that must throttle the feed...
+            $result = $ext->feedBeforeActualizeHook($feed);
+            $this->assertNull($result);
+
+            // ...but with the feed excluded, back-off no longer applies and the
+            // gate falls back to baseTTL alone, which elapsed time exceeds.
+            $ext->backoffExcludedFeeds = [$feed->id()];
+            $result = $ext->feedBeforeActualizeHook($feed);
+            $this->assertNotNull($result);
+            $this->assertSame($feed->id(), $result->id());
+        } finally {
+            if ($feed !== null) {
+                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            }
             FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
             FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
             FreshRSS_Context::userConf()->save();
