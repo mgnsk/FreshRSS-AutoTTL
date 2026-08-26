@@ -4,10 +4,10 @@
 	function refresh(root) {
 		var url = root.getAttribute('data-refresh-url');
 		if (!url) {
-			return;
+			return Promise.resolve();
 		}
 
-		fetch(url, { credentials: 'same-origin' })
+		return fetch(url, { credentials: 'same-origin' })
 			.then(function (response) { return response.text(); })
 			.then(function (html) {
 				var temp = document.createElement('div');
@@ -20,20 +20,24 @@
 			});
 	}
 
-	// Submits a form (or single button press) via fetch instead of a native
-	// submission, so the response never replaces the whole page - critical when
-	// this content is loaded into FreshRSS's slider panel, where a real
-	// navigation breaks out of the panel entirely. Always re-fetches the
-	// current state afterward instead of trusting an optimistic local update,
-	// since e.g. a back-off toggle changes server-computed TTLs/labels too.
-	function submitInBackground(form, root) {
-		fetch(form.getAttribute('action') || form.action, {
-			method: 'POST',
-			credentials: 'same-origin',
-			redirect: 'manual',
-			body: new FormData(form),
-		}).catch(function () {}).then(function () {
-			refresh(root);
+	// Each submit here saves the user's *entire* config back (see
+	// AutoTTLExtension::handleConfigureAction()/backoffController::toggleAction()),
+	// not just the one field being changed - so two of these in flight at once
+	// (e.g. rapid-clicking two switches) could race, with whichever save lands
+	// last silently clobbering the other's change. Queue them through one
+	// promise chain so only one submit+refresh cycle ever runs at a time.
+	var queue = Promise.resolve();
+
+	function submitInBackground(url, body, root) {
+		queue = queue.then(function () {
+			return fetch(url, {
+				method: 'POST',
+				credentials: 'same-origin',
+				redirect: 'manual',
+				body: body,
+			}).catch(function () {}).then(function () {
+				return refresh(root);
+			});
 		});
 	}
 
@@ -48,23 +52,17 @@
 		}
 
 		event.preventDefault();
-		fetch(button.getAttribute('formaction'), {
-			method: 'POST',
-			credentials: 'same-origin',
-			redirect: 'manual',
-			body: new FormData(button.form),
-		}).catch(function () {}).then(function () {
-			refresh(root);
-		});
+		submitInBackground(button.getAttribute('formaction'), new FormData(button.form), root);
 	});
 
 	document.addEventListener('submit', function (event) {
-		var root = event.target.closest ? event.target.closest('#' + ROOT_ID) : null;
+		var form = event.target;
+		var root = form.closest ? form.closest('#' + ROOT_ID) : null;
 		if (!root) {
 			return;
 		}
 
 		event.preventDefault();
-		submitInBackground(event.target, root);
+		submitInBackground(form.getAttribute('action') || form.action, new FormData(form), root);
 	});
 })();
