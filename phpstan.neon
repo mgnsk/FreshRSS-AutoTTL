@@ -2,7 +2,7 @@ parameters:
     level: 5
     paths:
         - extension.php
-        - stats.php
+        - src
         - tests
     scanDirectories:
         - vendor/freshrss.org/freshrss/lib

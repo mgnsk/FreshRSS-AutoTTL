@@ -23,7 +23,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 3599;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         // defaultTTL returned.
@@ -36,7 +36,7 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 86400;
         $minTTL = 7200;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, $minTTL));
         $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL);
 
         // avgTTL resolves to defaultTTL (3600) via the normal path, but minTTL (7200) floors it.
@@ -49,7 +49,7 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 86400;
         $minTTL = 1800;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, $minTTL));
         $adjustedTTL = $stats->calcAdjustedTTL(43200);
 
         // avgTTL (43200) already exceeds minTTL, so minTTL has no effect.
@@ -62,7 +62,7 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 86400;
 
         // No 4th arg: minTTL defaults to 0, i.e. no floor - matches pre-change behavior.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL(0);
 
         $this->assertSame($maxTTL, $adjustedTTL);
@@ -76,7 +76,7 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 3599;
         $minTTL = 7200;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, $minTTL));
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         $this->assertSame($minTTL, $adjustedTTL);
@@ -90,7 +90,7 @@ final class AutoTTLStatsTest extends TestCase
 
         // cronLastHookTs/cronIntervalEstimate default to 0 (not learned yet):
         // calcAdjustedTTL must ignore the lastAttempt anchor entirely.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL(1, $now - 100);
 
         $this->assertSame($defaultTTL, $adjustedTTL);
@@ -106,7 +106,7 @@ final class AutoTTLStatsTest extends TestCase
         // now-100, now+800, now+1700, ... The raw TTL (defaultTTL, since
         // avgTTL=1 is below it) would put the due time at now+600 - in the gap
         // between two sweeps - so the result must be pushed out to now+800.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, 0, $now - 100, 900));
         $lastAttempt = $now - 3000;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -124,7 +124,7 @@ final class AutoTTLStatsTest extends TestCase
         // the feed is due now and must snap to that sweep (now-100), never to
         // the following one at now+800. sampleCronInterval() moves the anchor to
         // now on every sweep, so deferring here would defer forever.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, 0, $now - 100, 900));
         $lastAttempt = $now - 4000;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -143,7 +143,7 @@ final class AutoTTLStatsTest extends TestCase
         // lastAttempt is chosen so the raw due time (lastAttempt + defaultTTL)
         // lands exactly on the second predicted sweep (cronLastHookTs + 2*900).
         // It must resolve to that same sweep, not overshoot to the third one.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 1000, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, 0, $now - 1000, 900));
         $lastAttempt = ($now + 800) - $defaultTTL;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -159,7 +159,7 @@ final class AutoTTLStatsTest extends TestCase
         // cronLastHookTs is far in the past (a stale/long-idle estimate) -
         // the ceiling-division math must still land on the correct sweep
         // without drifting, rather than looping through each missed one.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100000, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, 0, $now - 100000, 900));
         $lastAttempt = $now - 5000;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -175,7 +175,7 @@ final class AutoTTLStatsTest extends TestCase
         // lastAttempt defaults to 0 ("never attempted") - even with a learned
         // cron interval, snapping must not turn the predicted sweep's absolute
         // timestamp into a nonsensical TTL (see snapToNextSweep()).
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, $now - 100, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, 0, $now - 100, 900));
         $adjustedTTL = $stats->calcAdjustedTTL(1);
 
         $this->assertSame($defaultTTL, $adjustedTTL);
@@ -191,7 +191,7 @@ final class AutoTTLStatsTest extends TestCase
         // Raw TTL (defaultTTL via the escape hatch) is first floored to 4000s
         // by minTTL, then that due time is snapped forward to the next
         // predicted sweep (cronLastHookTs + 1800), landing at 4600s total.
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, $minTTL, $now - 1000, 1800);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100, $minTTL, $now - 1000, 1800));
         $lastAttempt = $now - 3800;
         $adjustedTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -203,7 +203,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL(0);
 
         // maxTTL returned.
@@ -215,7 +215,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL(-100);
 
         // maxTTL returned, not defaultTTL: a negative avgTTL (e.g. from a feed
@@ -228,7 +228,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL($maxTTL + 1);
 
         // maxTTL returned.
@@ -240,7 +240,7 @@ final class AutoTTLStatsTest extends TestCase
         $defaultTTL = 3600;
         $maxTTL = 86400;
 
-        $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
         $adjustedTTL = $stats->calcAdjustedTTL($defaultTTL - 1);
 
         // defaultTTL returned.
@@ -260,7 +260,7 @@ final class AutoTTLStatsTest extends TestCase
             // bound below safe from PHP/wiremock clock skew.
             $now = time();
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now);
 
             // (now - -16h) / 3 = 57600 seconds / 3 = 19200 seconds
@@ -285,7 +285,7 @@ final class AutoTTLStatsTest extends TestCase
             // + 2 seconds); see test_get_avg_ttl_three_per_day for why.
             $now = time();
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
 
             // Two updates in a row when we checked implies frequent updates.
             // 2 seconds / 2 entries = 1 second < $defaultTTL
@@ -319,7 +319,7 @@ final class AutoTTLStatsTest extends TestCase
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
             $adjustedTTL = $stats->getAdjustedTTL($feed->id(), time());
 
             // future_dated.xml's entries are dated via wiremock's "now" templating
@@ -365,7 +365,7 @@ final class AutoTTLStatsTest extends TestCase
             $feedDAO->updateLastError($erroredFeed->id(), $now - 600);
             $feedDAO->updateFeed($customTTLFeed->id(), ['ttl' => 1800]);
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
 
             $autoTTLStats = $stats->getFeedStats(true);
             $autoTTLIds = array_map(fn (StatItem $item) => $item->id, $autoTTLStats);
@@ -377,11 +377,11 @@ final class AutoTTLStatsTest extends TestCase
 
             foreach ($autoTTLStats as $item) {
                 if ($item->id === $autoTTLFeed->id()) {
-                    $this->assertFalse($item->isErroring);
+                    $this->assertFalse($item->attempt->isErroring);
                     // (now - -16h) / 3 = 19200 seconds
                     $this->assertSame(19200, $item->avgTTL);
                 } elseif ($item->id === $erroredFeed->id()) {
-                    $this->assertTrue($item->isErroring);
+                    $this->assertTrue($item->attempt->isErroring);
                 } elseif ($item->id === $futureDatedFeed->id()) {
                     // future_dated.xml's entries are dated via wiremock's "now"
                     // templating helper, offset +2/+3 years, so they're always
@@ -440,7 +440,7 @@ final class AutoTTLStatsTest extends TestCase
             }
             $feedDAO->updateFeed($customTTLFeed->id(), ['ttl' => 1800]);
 
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
 
             // All three wiremock:8080 feeds share the same exact host, so they
             // must be grouped together with distinct ranks...
@@ -448,20 +448,20 @@ final class AutoTTLStatsTest extends TestCase
             $info2 = $stats->getGroupInfoForFeed($feed2->id());
             $info3 = $stats->getGroupInfoForFeed($feed3->id());
 
-            $this->assertSame('wiremock', $info1['host']);
-            $this->assertSame(3, $info1['size']);
-            $this->assertSame(3, $info2['size']);
-            $this->assertSame(3, $info3['size']);
+            $this->assertSame('wiremock', $info1->host);
+            $this->assertSame(3, $info1->size);
+            $this->assertSame(3, $info2->size);
+            $this->assertSame(3, $info3->size);
 
-            $ranks = [$info1['rank'], $info2['rank'], $info3['rank']];
+            $ranks = [$info1->rank, $info2->rank, $info3->rank];
             sort($ranks);
             $this->assertSame([0, 1, 2], $ranks);
 
             // ...but a feed with a custom (non-AutoTTL) TTL must be excluded,
             // even though it's also erroring - it returns the ungrouped default.
             $customInfo = $stats->getGroupInfoForFeed($customTTLFeed->id());
-            $this->assertSame(1, $customInfo['size']);
-            $this->assertSame('', $customInfo['host']);
+            $this->assertSame(1, $customInfo->size);
+            $this->assertSame('', $customInfo->host);
         } finally {
             foreach ([$feed1, $feed2, $feed3, $customTTLFeed] as $feed) {
                 if ($feed !== null) {
@@ -485,10 +485,10 @@ final class AutoTTLStatsTest extends TestCase
             'avgTTL' => 3600,
         ], $baseTTL, $maxTTL);
 
-        $this->assertSame(1000, $item1->lastUpdate);
+        $this->assertSame(1000, $item1->attempt->lastUpdate);
         $this->assertSame(500, $item1->lastError);
-        $this->assertSame(1000, $item1->lastAttempt);
-        $this->assertFalse($item1->isErroring);
+        $this->assertSame(1000, $item1->attempt->lastAttempt);
+        $this->assertFalse($item1->attempt->isErroring);
         $this->assertSame($baseTTL, $item1->baseTTL);
         $this->assertSame($baseTTL, $item1->backoffTTL);
 
@@ -505,12 +505,12 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 2000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL, 0, 0, 2);
+        ], $baseTTL, $maxTTL, 0, new ErrorGroupInfo(0, 2));
 
-        $this->assertSame(1000, $item2->lastUpdate);
+        $this->assertSame(1000, $item2->attempt->lastUpdate);
         $this->assertSame(2000, $item2->lastError);
-        $this->assertSame(2000, $item2->lastAttempt);
-        $this->assertTrue($item2->isErroring);
+        $this->assertSame(2000, $item2->attempt->lastAttempt);
+        $this->assertTrue($item2->attempt->isErroring);
         $this->assertSame($baseTTL, $item2->baseTTL);
         $this->assertSame($baseTTL, $item2->backoffTTL);
 
@@ -522,7 +522,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 8200,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL, 0, 0, 2);
+        ], $baseTTL, $maxTTL, 0, new ErrorGroupInfo(0, 2));
 
         $this->assertSame($baseTTL, $item3->baseTTL);
         $this->assertSame(7200, $item3->backoffTTL);
@@ -535,7 +535,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 1000 + 200000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL, 0, 0, 2);
+        ], $baseTTL, $maxTTL, 0, new ErrorGroupInfo(0, 2));
 
         $this->assertSame($maxTTL, $item4->backoffTTL);
     }
@@ -552,10 +552,10 @@ final class AutoTTLStatsTest extends TestCase
         $groupSize = 2;
 
         // Not erroring: backoff is always just baseTTL.
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100000, false, $maxTTL, 0, 0, $groupSize));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, 100000, false), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize)));
 
         // errorAge below baseTTL: clamped up to baseTTL.
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 1800, true, $maxTTL, 0, 0, $groupSize));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, 1800, true), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize)));
 
         // Simulate consecutive throttled retries: each retry only happens after
         // waiting the previous backoffTTL, so errorAge grows by that amount each
@@ -563,7 +563,7 @@ final class AutoTTLStatsTest extends TestCase
         $errorAge = $baseTTL;
         $backoffs = [];
         for ($i = 0; $i < 5; $i++) {
-            $backoff = StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $errorAge, true, $maxTTL, 0, 0, $groupSize);
+            $backoff = BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, $errorAge, true), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize));
             $backoffs[] = $backoff;
             $errorAge += $backoff;
         }
@@ -571,7 +571,7 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame([3600, 7200, 14400, 28800, 57600], $backoffs);
 
         // Clamped at maxTTL however large errorAge grows.
-        $this->assertSame($maxTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL, 0, 0, $groupSize));
+        $this->assertSame($maxTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, $maxTTL * 10, true), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize)));
     }
 
     public function test_calc_backoff_ttl_solo_feed_returns_base_ttl(): void
@@ -584,10 +584,10 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 86400;
         $lastUpdate = 0;
 
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, $maxTTL * 10, true), $maxTTL));
 
         // Also holds on the cron-aware path (cronInterval > 0).
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL, 1800));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, $maxTTL * 10, true), $maxTTL, 1800));
     }
 
     public function test_calc_backoff_ttl_never_below_base_ttl_when_base_exceeds_max(): void
@@ -601,8 +601,8 @@ final class AutoTTLStatsTest extends TestCase
         $lastUpdate = 0;
         $groupSize = 2;
 
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100, true, $maxTTL, 0, 0, $groupSize));
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $baseTTL * 10, true, $maxTTL, 0, 0, $groupSize));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, 100, true), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize)));
+        $this->assertSame($baseTTL, BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastUpdate, $baseTTL * 10, true), $maxTTL, 0, new ErrorGroupInfo(0, $groupSize)));
     }
 
     public function test_calc_skip_sweeps_range_grows_and_clamps(): void
@@ -615,13 +615,13 @@ final class AutoTTLStatsTest extends TestCase
         // (bumped to fit groupSize), and every slot is always at least 1 sweep -
         // never eager on its own error.
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skip = StatItem::calcSkipSweeps($lastUpdate, 100, $cronInterval, 1000, $rank, $groupSize, 'example.com');
+            $skip = BackoffCalculator::calcSkipSweeps(new FeedAttempt($lastUpdate, 100), $cronInterval, 1000, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $this->assertGreaterThanOrEqual(1, $skip);
         }
 
         // Long-erroring group: the range grows well past MIN_SKIP_SWEEPS, so the
         // draw can exceed it too.
-        $skip = StatItem::calcSkipSweeps($lastUpdate, 20 * $cronInterval, $cronInterval, 1000, 0, $groupSize, 'example.com');
+        $skip = BackoffCalculator::calcSkipSweeps(new FeedAttempt($lastUpdate, 20 * $cronInterval), $cronInterval, 1000, new ErrorGroupInfo(0, $groupSize, 'example.com'));
         $this->assertGreaterThanOrEqual(1, $skip);
         $this->assertLessThanOrEqual(20, $skip);
 
@@ -630,7 +630,7 @@ final class AutoTTLStatsTest extends TestCase
         // coarse cron relative to maxTTL), preserving the same eventual-retry
         // cap maxTTL provides today.
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skip = StatItem::calcSkipSweeps($lastUpdate, 10_000_000, $cronInterval, 3, $rank, $groupSize, 'example.com');
+            $skip = BackoffCalculator::calcSkipSweeps(new FeedAttempt($lastUpdate, 10_000_000), $cronInterval, 3, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $this->assertGreaterThanOrEqual(1, $skip);
             $this->assertLessThanOrEqual(3, $skip);
         }
@@ -640,8 +640,8 @@ final class AutoTTLStatsTest extends TestCase
     {
         $cronInterval = 900;
 
-        $a = StatItem::calcSkipSweeps(0, 5000, $cronInterval, 1000, 2, 5, 'example.com');
-        $b = StatItem::calcSkipSweeps(0, 5000, $cronInterval, 1000, 2, 5, 'example.com');
+        $a = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 5000), $cronInterval, 1000, new ErrorGroupInfo(2, 5, 'example.com'));
+        $b = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 5000), $cronInterval, 1000, new ErrorGroupInfo(2, 5, 'example.com'));
 
         $this->assertSame($a, $b);
     }
@@ -653,7 +653,7 @@ final class AutoTTLStatsTest extends TestCase
 
         $skips = [];
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
+            $skips[] = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 100), $cronInterval, 1000, new ErrorGroupInfo($rank, $groupSize, 'www.youtube.com'));
         }
 
         $this->assertCount($groupSize, array_unique($skips), 'Expected every member of a same-host group to get a distinct slot');
@@ -665,7 +665,7 @@ final class AutoTTLStatsTest extends TestCase
 
         $skips = [];
         foreach (['www.youtube.com', 'example.org', 'feeds.example.net', 'podcasts.example.com', 'news.example.io'] as $host) {
-            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, 0, 3, $host);
+            $skips[] = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 100), $cronInterval, 1000, new ErrorGroupInfo(0, 3, $host));
         }
 
         $this->assertGreaterThan(1, count(array_unique($skips)), 'Expected the rank-0 slot to vary across different host groups');
@@ -678,7 +678,7 @@ final class AutoTTLStatsTest extends TestCase
         $groupSize = 10;
 
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skip = StatItem::calcSkipSweeps(0, 100, $cronInterval, $maxSweeps, $rank, $groupSize, 'www.youtube.com');
+            $skip = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 100), $cronInterval, $maxSweeps, new ErrorGroupInfo($rank, $groupSize, 'www.youtube.com'));
             $this->assertGreaterThanOrEqual(1, $skip);
             $this->assertLessThanOrEqual($maxSweeps, $skip);
         }
@@ -694,11 +694,11 @@ final class AutoTTLStatsTest extends TestCase
         // disperse into without collisions.
         $skips = [];
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
+            $skips[] = BackoffCalculator::calcSkipSweeps(new FeedAttempt(0, 100), $cronInterval, 1000, new ErrorGroupInfo($rank, $groupSize, 'www.youtube.com'));
         }
 
         $this->assertCount($groupSize, array_unique($skips));
-        $this->assertGreaterThan(StatItem::MIN_SKIP_SWEEPS, max($skips), 'Expected the range to bump past MIN_SKIP_SWEEPS to fit the whole group');
+        $this->assertGreaterThan(BackoffCalculator::MIN_SKIP_SWEEPS, max($skips), 'Expected the range to bump past MIN_SKIP_SWEEPS to fit the whole group');
     }
 
     public function test_calc_backoff_ttl_cron_aware_grows_and_clamps(): void
@@ -711,14 +711,14 @@ final class AutoTTLStatsTest extends TestCase
         // Fresh error: backoffTTL is baseTTL plus a random 0..(MIN_SKIP_SWEEPS-1)
         // extra sweeps.
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, 100, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
+            $backoffTTL = BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt(0, 100, true), $maxTTL, $cronInterval, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $this->assertGreaterThanOrEqual($baseTTL, $backoffTTL);
-            $this->assertLessThanOrEqual($baseTTL + (StatItem::MIN_SKIP_SWEEPS - 1) * $cronInterval, $backoffTTL);
+            $this->assertLessThanOrEqual($baseTTL + (BackoffCalculator::MIN_SKIP_SWEEPS - 1) * $cronInterval, $backoffTTL);
         }
 
         // Clamped at maxTTL however large errorAge grows.
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, $maxTTL * 10, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
+            $backoffTTL = BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt(0, $maxTTL * 10, true), $maxTTL, $cronInterval, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
         }
     }
@@ -734,7 +734,7 @@ final class AutoTTLStatsTest extends TestCase
         $groupSize = 3;
 
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, $maxTTL * 10, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
+            $backoffTTL = BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt(0, $maxTTL * 10, true), $maxTTL, $cronInterval, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $this->assertGreaterThanOrEqual($baseTTL, $backoffTTL);
             $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
         }
@@ -753,12 +753,12 @@ final class AutoTTLStatsTest extends TestCase
         $maxTTL = 86400;
         $groupSize = 30;
 
-        $stats = new AutoTTLStats(3600, $maxTTL, 100, 0, $cronLastHookTs, $cronIntervalEstimate);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, $maxTTL, 100, 0, $cronLastHookTs, $cronIntervalEstimate));
         $lastAttempt = $now - $baseTTL; // due right about now, before backoff pushes it out
 
         $dueSweeps = [];
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $lastAttempt - 1, $lastAttempt, true, $maxTTL, $cronIntervalEstimate, $rank, $groupSize, 'example.com');
+            $backoffTTL = BackoffCalculator::calcBackoffTTL($baseTTL, new FeedAttempt($lastAttempt - 1, $lastAttempt, true), $maxTTL, $cronIntervalEstimate, new ErrorGroupInfo($rank, $groupSize, 'example.com'));
             $effectiveTTL = $stats->snapToNextSweep($lastAttempt, $backoffTTL);
             $dueSweeps[] = $lastAttempt + $effectiveTTL;
         }
@@ -772,8 +772,8 @@ final class AutoTTLStatsTest extends TestCase
         $result = CronIntervalEstimator::updateEstimate($now, 0, 0);
 
         // Nothing to compare the very first call against yet: just remember when it happened.
-        $this->assertSame(0, $result['estimate']);
-        $this->assertSame($now, $result['lastHookTs']);
+        $this->assertSame(0, $result->estimate);
+        $this->assertSame($now, $result->lastHookTs);
     }
 
     public function test_cron_interval_estimator_ignores_intra_sweep_gap(): void
@@ -784,8 +784,8 @@ final class AutoTTLStatsTest extends TestCase
         // A gap just under the threshold looks like the next feed in the same sweep.
         $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 1200);
 
-        $this->assertSame(1200, $result['estimate']);
-        $this->assertSame($lastHookTs, $result['lastHookTs']);
+        $this->assertSame(1200, $result->estimate);
+        $this->assertSame($lastHookTs, $result->lastHookTs);
     }
 
     public function test_cron_interval_estimator_ratchets_up_on_bigger_gap(): void
@@ -796,8 +796,8 @@ final class AutoTTLStatsTest extends TestCase
         // No prior estimate: a new-sweep gap is trusted immediately.
         $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 0);
 
-        $this->assertSame(7200, $result['estimate']);
-        $this->assertSame($now, $result['lastHookTs']);
+        $this->assertSame(7200, $result->estimate);
+        $this->assertSame($now, $result->lastHookTs);
     }
 
     public function test_cron_interval_estimator_eases_down_on_smaller_gap(): void
@@ -809,8 +809,8 @@ final class AutoTTLStatsTest extends TestCase
         // instantly undercutting backoff for erroring feeds.
         $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 1200);
 
-        $this->assertSame((int) (0.7 * 1200 + 0.3 * 600), $result['estimate']);
-        $this->assertSame($now, $result['lastHookTs']);
+        $this->assertSame((int) (0.7 * 1200 + 0.3 * 600), $result->estimate);
+        $this->assertSame($now, $result->lastHookTs);
     }
 
     public function test_cron_interval_estimator_treats_threshold_gap_as_new_sweep(): void
@@ -820,8 +820,8 @@ final class AutoTTLStatsTest extends TestCase
 
         $result = CronIntervalEstimator::updateEstimate($now, $lastHookTs, 0);
 
-        $this->assertSame(CronIntervalEstimator::MIN_SWEEP_GAP, $result['estimate']);
-        $this->assertSame($now, $result['lastHookTs']);
+        $this->assertSame(CronIntervalEstimator::MIN_SWEEP_GAP, $result->estimate);
+        $this->assertSame($now, $result->lastHookTs);
     }
 
     public function test_feed_before_actualize_throttles_recent_error(): void
@@ -1136,7 +1136,7 @@ final class AutoTTLStatsTest extends TestCase
             // instant forms a real back-off group, so calcSkipSweeps() actually
             // adds whole-sweep skips on top of baseTTL below - without a
             // sibling, groupSize stays 1 and back-off never applies (see
-            // StatItem::calcBackoffTTL).
+            // BackoffCalculator::calcBackoffTTL).
             $sibling = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
             $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
@@ -1163,7 +1163,7 @@ final class AutoTTLStatsTest extends TestCase
             // Whatever skip sweeps resolve to, getBackoffTTL() must land exactly
             // on the predicted sweep grid (cronLastHookTs + n*cronIntervalEstimate)
             // by construction - not merely after a corrective snapToNextSweep() pass.
-            $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
+            $lastAttempt = FeedAttempt::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
             $ttl = $ext->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
             $backoffTTL = $ext->getBackoffTTL($feed, $ttl);
 
@@ -1180,7 +1180,7 @@ final class AutoTTLStatsTest extends TestCase
 
     public function test_snap_to_next_sweep_is_noop_without_learned_cron_interval(): void
     {
-        $stats = new AutoTTLStats(3600, 86400, 100);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, 86400, 100));
         $now = time();
 
         // No cronLastHookTs/cronIntervalEstimate: the value must pass through unchanged.
@@ -1195,7 +1195,7 @@ final class AutoTTLStatsTest extends TestCase
         // no real anchor to snap against, so even with a learned cron interval the
         // TTL must pass through unchanged rather than snapToNextSweep() returning
         // an absolute predicted-sweep timestamp as if it were a TTL.
-        $stats = new AutoTTLStats(3600, 86400, 100, 0, $now - 100, 900);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, 86400, 100, 0, $now - 100, 900));
 
         $this->assertSame(4650, $stats->snapToNextSweep(0, 4650));
     }
@@ -1206,7 +1206,7 @@ final class AutoTTLStatsTest extends TestCase
         $cronLastHookTs = $now - 100;
         $cronIntervalEstimate = 900;
 
-        $stats = new AutoTTLStats(3600, 86400, 100, 0, $cronLastHookTs, $cronIntervalEstimate);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, 86400, 100, 0, $cronLastHookTs, $cronIntervalEstimate));
         $lastAttempt = $now - 3000;
 
         // baseTTL already lands exactly on the predicted sweep at now+800 (see
@@ -1230,7 +1230,7 @@ final class AutoTTLStatsTest extends TestCase
         $cronLastHookTs = $now - 100;
         $cronIntervalEstimate = 900;
 
-        $stats = new AutoTTLStats(3600, 86400, 100, 0, $cronLastHookTs, $cronIntervalEstimate);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, 86400, 100, 0, $cronLastHookTs, $cronIntervalEstimate));
         $lastAttempt = $now - 4000;
         $baseTTL = $stats->calcAdjustedTTL(1, $lastAttempt);
 
@@ -1255,7 +1255,7 @@ final class AutoTTLStatsTest extends TestCase
         // snapped TTL must stay within the elapsed time - otherwise
         // feedBeforeActualizeHook()'s `elapsed < ttl` gate skips a feed that is
         // due, and skips it again on the next sweep, and so on forever.
-        $stats = new AutoTTLStats(3600, 86400, 100, 0, $now, $cronIntervalEstimate);
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, 86400, 100, 0, $now, $cronIntervalEstimate));
 
         for ($overdueBy = 0; $overdueBy <= 3 * $cronIntervalEstimate; $overdueBy += 137) {
             $ttl = 3600;
@@ -1286,7 +1286,7 @@ final class AutoTTLStatsTest extends TestCase
         $refreshedAtSweeps = [];
         for ($sweep = 0; $sweep < 12; $sweep++) {
             $sweepTime = $now + $sweep * $cronIntervalEstimate;
-            $stats = new AutoTTLStats($defaultTTL, 86400, 100, 0, $sweepTime, $cronIntervalEstimate);
+            $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, 86400, 100, 0, $sweepTime, $cronIntervalEstimate));
 
             $ttl = $stats->calcAdjustedTTL(2100, $lastAttempt);
             $effectiveTTL = $stats->snapToNextSweep($lastAttempt, $ttl);
