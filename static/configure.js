@@ -35,17 +35,26 @@
 				credentials: 'same-origin',
 				redirect: 'manual',
 				body: body,
-			}).catch(function () {}).then(function () {
-				return refresh(root);
-			}).then(function () {
+			}).then(function (response) {
+				// redirect: 'manual' turns a successful save (the server redirects
+				// back to the configure page) into an opaque response with status 0
+				// and ok:false - that's the success case here, not a failure. Any
+				// other non-ok response (CSRF failure, 500, ...) is a real failure.
+				return response.type === 'opaqueredirect' || response.ok;
+			}, function () {
+				return false; // network failure
+			}).then(function (saved) {
+				// Refresh either way, so the panel reflects whatever actually ended
+				// up persisted server-side, even after a failed save.
+				return refresh(root).then(function () {
+					return saved;
+				});
+			}).then(function (saved) {
 				// openNotification() is FreshRSS core's own toast (p/scripts/main.js),
 				// already loaded/initialized on every admin page - reuse it instead of
-				// adding our own notification markup/CSS. redirect: 'manual' above
-				// means a successful save surfaces as an opaque redirect response, not
-				// a checkable status, so there's no reliable way to detect failure here
-				// to show a 'bad' notification instead.
+				// adding our own notification markup/CSS.
 				if (typeof openNotification === 'function') {
-					openNotification('Saved', 'good');
+					openNotification(saved ? 'Saved' : 'Save failed', saved ? 'good' : 'bad');
 				}
 			});
 		});
