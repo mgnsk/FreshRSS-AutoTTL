@@ -416,62 +416,6 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
-    public function test_get_feed_stats_respects_backoff_excluded_feeds(): void
-    {
-        $defaultTTL = 3600;
-        $maxTTL = 86400;
-
-        $excludedFeed = null;
-        $normalErroringFeed = null;
-        try {
-            $excludedFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
-            $normalErroringFeed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
-            // Captured after both fetches; see test_get_avg_ttl_three_per_day for why.
-            $now = time();
-
-            $feedDAO = FreshRSS_Factory::createFeedDao();
-
-            $feedDAO->updateLastUpdate($excludedFeed->id(), $now - 86400);
-            $feedDAO->updateLastError($excludedFeed->id(), $now - 600);
-
-            // Same deterministic offsets as
-            // test_feed_before_actualize_backoff_excluded_feed_ignores_error_backoff:
-            // lastAttempt = $now - 115200 pins baseTTL to 28800s (see
-            // test_get_avg_two_close), and errorAge = 150000s pushes the
-            // bootstrap backoff formula (cronInterval == 0) well above it,
-            // clamped at maxTTL (86400s) - either way, strictly above baseTTL.
-            $lastErrorTs = $now - 115200;
-            $lastUpdateTs = $lastErrorTs - 150000;
-            $feedDAO->updateLastUpdate($normalErroringFeed->id(), $lastUpdateTs);
-            $feedDAO->updateLastError($normalErroringFeed->id(), $lastErrorTs);
-
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, 0, 0, [$excludedFeed->id()]);
-
-            $items = $stats->getFeedStats(true);
-            $byId = [];
-            foreach ($items as $item) {
-                $byId[$item->id] = $item;
-            }
-
-            // Excluded feed is still erroring, but back-off must not apply: its
-            // effective TTL stays at baseTTL, matching a healthy feed's behavior.
-            $this->assertTrue($byId[$excludedFeed->id()]->isErroring);
-            $this->assertFalse($byId[$excludedFeed->id()]->backoffEnabled);
-            $this->assertSame($byId[$excludedFeed->id()]->baseTTL, $byId[$excludedFeed->id()]->backoffTTL);
-
-            // A sibling erroring feed not in the exclusion list still backs off.
-            $this->assertTrue($byId[$normalErroringFeed->id()]->isErroring);
-            $this->assertTrue($byId[$normalErroringFeed->id()]->backoffEnabled);
-            $this->assertGreaterThan($byId[$normalErroringFeed->id()]->baseTTL, $byId[$normalErroringFeed->id()]->backoffTTL);
-        } finally {
-            foreach ([$excludedFeed, $normalErroringFeed] as $feed) {
-                if ($feed !== null) {
-                    FreshRSS_feed_Controller::deleteFeed($feed->id());
-                }
-            }
-        }
-    }
-
     public function test_get_group_info_for_feed_groups_by_exact_host(): void
     {
         $defaultTTL = 3600;
@@ -527,51 +471,6 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
-    public function test_get_group_info_excludes_backoff_excluded_feeds(): void
-    {
-        $defaultTTL = 3600;
-        $maxTTL = 86400;
-
-        $feed1 = null;
-        $feed2 = null;
-        $feed3 = null;
-        try {
-            $feed1 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
-            $feed2 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
-            $feed3 = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
-
-            $feedDAO = FreshRSS_Factory::createFeedDao();
-            $now = time();
-
-            foreach ([$feed1, $feed2, $feed3] as $feed) {
-                $feedDAO->updateLastUpdate($feed->id(), $now - 86400);
-                $feedDAO->updateLastError($feed->id(), $now - 600);
-            }
-
-            // Exclude feed3 from back-off: it must drop out of the shared-host
-            // group entirely (not just have its own back-off disabled), so it
-            // doesn't consume/skew a slot meant for feed1/feed2.
-            $stats = new AutoTTLStats($defaultTTL, $maxTTL, 100, 0, 0, 0, [$feed3->id()]);
-
-            $info1 = $stats->getGroupInfoForFeed($feed1->id());
-            $info2 = $stats->getGroupInfoForFeed($feed2->id());
-            $info3 = $stats->getGroupInfoForFeed($feed3->id());
-
-            $this->assertSame(2, $info1['size']);
-            $this->assertSame(2, $info2['size']);
-
-            // Excluded feed isn't in the group query at all - ungrouped default.
-            $this->assertSame(1, $info3['size']);
-            $this->assertSame('', $info3['host']);
-        } finally {
-            foreach ([$feed1, $feed2, $feed3] as $feed) {
-                if ($feed !== null) {
-                    FreshRSS_feed_Controller::deleteFeed($feed->id());
-                }
-            }
-        }
-    }
-
     public function test_stat_item_last_attempt(): void
     {
         $baseTTL = 3600;
@@ -593,6 +492,11 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame($baseTTL, $item1->baseTTL);
         $this->assertSame($baseTTL, $item1->backoffTTL);
 
+        // items 2-4 below pass groupSize=2 - back-off only ever applies to a
+        // feed sharing a host with another currently-erroring feed (see
+        // calcBackoffTTL's groupSize gate), so without it these would all
+        // resolve to baseTTL regardless of errorAge.
+
         // errorAge (1000s) below baseTTL (3600s): backoff stays at baseTTL.
         $item2 = new StatItem([
             'id' => 2,
@@ -601,7 +505,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 2000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL);
+        ], $baseTTL, $maxTTL, 0, 0, 2);
 
         $this->assertSame(1000, $item2->lastUpdate);
         $this->assertSame(2000, $item2->lastError);
@@ -618,7 +522,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 8200,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL);
+        ], $baseTTL, $maxTTL, 0, 0, 2);
 
         $this->assertSame($baseTTL, $item3->baseTTL);
         $this->assertSame(7200, $item3->backoffTTL);
@@ -631,7 +535,7 @@ final class AutoTTLStatsTest extends TestCase
             'error' => 1000 + 200000,
             'ttl' => 0,
             'avgTTL' => 3600,
-        ], $baseTTL, $maxTTL);
+        ], $baseTTL, $maxTTL, 0, 0, 2);
 
         $this->assertSame($maxTTL, $item4->backoffTTL);
     }
@@ -641,13 +545,17 @@ final class AutoTTLStatsTest extends TestCase
         $baseTTL = 3600;
         $maxTTL = 86400;
         $lastUpdate = 0;
-        $feedId = 1;
+        // groupSize > 1: back-off only ever applies to a feed sharing a host
+        // with another currently-erroring feed - see
+        // test_calc_backoff_ttl_solo_feed_returns_base_ttl for the groupSize
+        // <= 1 case.
+        $groupSize = 2;
 
         // Not erroring: backoff is always just baseTTL.
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, 100000, 0, false, $maxTTL));
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100000, false, $maxTTL, 0, 0, $groupSize));
 
         // errorAge below baseTTL: clamped up to baseTTL.
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, 1800, 1800, true, $maxTTL));
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 1800, true, $maxTTL, 0, 0, $groupSize));
 
         // Simulate consecutive throttled retries: each retry only happens after
         // waiting the previous backoffTTL, so errorAge grows by that amount each
@@ -655,7 +563,7 @@ final class AutoTTLStatsTest extends TestCase
         $errorAge = $baseTTL;
         $backoffs = [];
         for ($i = 0; $i < 5; $i++) {
-            $backoff = StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $errorAge, $errorAge, true, $maxTTL);
+            $backoff = StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $errorAge, true, $maxTTL, 0, 0, $groupSize);
             $backoffs[] = $backoff;
             $errorAge += $backoff;
         }
@@ -663,44 +571,23 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame([3600, 7200, 14400, 28800, 57600], $backoffs);
 
         // Clamped at maxTTL however large errorAge grows.
-        $this->assertSame($maxTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL));
+        $this->assertSame($maxTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL, 0, 0, $groupSize));
     }
 
-    public function test_calc_backoff_ttl_disabled_returns_base_ttl(): void
+    public function test_calc_backoff_ttl_solo_feed_returns_base_ttl(): void
     {
-        // backoffEnabled = false must behave exactly like a non-erroring feed:
-        // baseTTL regardless of error age or cron interval - see issue #50.
+        // groupSize <= 1 (the default) means no other AutoTTL-managed feed is
+        // currently erroring on the same host - back-off only exists to spread
+        // out a shared-host pile-up, so a lone erroring feed must always
+        // resolve to baseTTL, however long it's been failing.
         $baseTTL = 3600;
         $maxTTL = 86400;
         $lastUpdate = 0;
-        $feedId = 1;
 
-        $this->assertSame(
-            $baseTTL,
-            StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL, 0, 0, 1, '', false)
-        );
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL));
 
         // Also holds on the cron-aware path (cronInterval > 0).
-        $this->assertSame(
-            $baseTTL,
-            StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $maxTTL * 10, $maxTTL * 10, true, $maxTTL, 1800, 0, 1, '', false)
-        );
-    }
-
-    public function test_calc_backoff_ttl_legacy_fallback_is_deterministic_without_cron_interval(): void
-    {
-        // cronInterval == 0 (bootstrap, cadence not learned yet): no per-feed
-        // randomization is applied - two feeds erroring identically must resolve
-        // to the exact same backoffTTL, unlike the cron-aware path below.
-        $baseTTL = 3600;
-        $maxTTL = 86400;
-        $lastUpdate = 0;
-        $lastAttempt = 7200;
-
-        $backoff1 = StatItem::calcBackoffTTL($baseTTL, 1, $lastUpdate, $lastAttempt, $lastAttempt, true, $maxTTL);
-        $backoff2 = StatItem::calcBackoffTTL($baseTTL, 999, $lastUpdate, $lastAttempt, $lastAttempt, true, $maxTTL);
-
-        $this->assertSame($backoff1, $backoff2);
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $maxTTL * 10, true, $maxTTL, 1800));
     }
 
     public function test_calc_backoff_ttl_never_below_base_ttl_when_base_exceeds_max(): void
@@ -712,84 +599,49 @@ final class AutoTTLStatsTest extends TestCase
         $baseTTL = 7200;
         $maxTTL = 3600;
         $lastUpdate = 0;
-        $feedId = 1;
+        $groupSize = 2;
 
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, 100, 100, true, $maxTTL));
-        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $feedId, $lastUpdate, $baseTTL * 10, $baseTTL * 10, true, $maxTTL));
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, 100, true, $maxTTL, 0, 0, $groupSize));
+        $this->assertSame($baseTTL, StatItem::calcBackoffTTL($baseTTL, $lastUpdate, $baseTTL * 10, true, $maxTTL, 0, 0, $groupSize));
     }
 
     public function test_calc_skip_sweeps_range_grows_and_clamps(): void
     {
         $cronInterval = 900;
         $lastUpdate = 0;
+        $groupSize = 5;
 
-        // Fresh error (errorAge below one sweep): range floors at MIN_SKIP_SWEEPS,
-        // and the draw is always at least 1 sweep - never eager on its own error.
-        for ($feedId = 1; $feedId <= 20; $feedId++) {
-            $skip = StatItem::calcSkipSweeps($feedId, $lastUpdate, 100, 12345, $cronInterval, 1000);
+        // Fresh error (errorAge below one sweep): range floors at MIN_SKIP_SWEEPS
+        // (bumped to fit groupSize), and every slot is always at least 1 sweep -
+        // never eager on its own error.
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $skip = StatItem::calcSkipSweeps($lastUpdate, 100, $cronInterval, 1000, $rank, $groupSize, 'example.com');
             $this->assertGreaterThanOrEqual(1, $skip);
-            $this->assertLessThanOrEqual(StatItem::MIN_SKIP_SWEEPS, $skip);
         }
 
-        // Long-erroring feed: the range grows well past MIN_SKIP_SWEEPS, so the
-        // draw can exceed it too. A single feedId+lastError pair is always
-        // deterministic (see test_calc_skip_sweeps_is_deterministic_per_error),
-        // so sample varying lastError values to observe the range itself.
-        $skips = [];
-        for ($lastErrorSample = 1; $lastErrorSample <= 20; $lastErrorSample++) {
-            $skip = StatItem::calcSkipSweeps(1, $lastUpdate, 20 * $cronInterval, $lastErrorSample, $cronInterval, 1000);
-            $skips[] = $skip;
-            $this->assertGreaterThanOrEqual(1, $skip);
-            $this->assertLessThanOrEqual(20, $skip);
-        }
-        $this->assertGreaterThan(StatItem::MIN_SKIP_SWEEPS, max($skips), 'Expected the range to grow past MIN_SKIP_SWEEPS for a long-erroring feed');
+        // Long-erroring group: the range grows well past MIN_SKIP_SWEEPS, so the
+        // draw can exceed it too.
+        $skip = StatItem::calcSkipSweeps($lastUpdate, 20 * $cronInterval, $cronInterval, 1000, 0, $groupSize, 'example.com');
+        $this->assertGreaterThanOrEqual(1, $skip);
+        $this->assertLessThanOrEqual(20, $skip);
 
         // Clamped at maxSweeps however large errorAge grows - even when
-        // MIN_SKIP_SWEEPS alone would otherwise exceed maxSweeps (a coarse cron
-        // relative to maxTTL), preserving the same eventual-retry cap maxTTL
-        // provides today.
-        for ($feedId = 1; $feedId <= 20; $feedId++) {
-            $skip = StatItem::calcSkipSweeps($feedId, $lastUpdate, 10_000_000, 999, $cronInterval, 3);
+        // MIN_SKIP_SWEEPS/groupSize alone would otherwise exceed maxSweeps (a
+        // coarse cron relative to maxTTL), preserving the same eventual-retry
+        // cap maxTTL provides today.
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $skip = StatItem::calcSkipSweeps($lastUpdate, 10_000_000, $cronInterval, 3, $rank, $groupSize, 'example.com');
             $this->assertGreaterThanOrEqual(1, $skip);
             $this->assertLessThanOrEqual(3, $skip);
         }
     }
 
-    public function test_calc_skip_sweeps_is_deterministic_per_error(): void
+    public function test_calc_skip_sweeps_is_deterministic(): void
     {
         $cronInterval = 900;
 
-        $a = StatItem::calcSkipSweeps(5, 0, 5000, 42, $cronInterval, 1000);
-        $b = StatItem::calcSkipSweeps(5, 0, 5000, 42, $cronInterval, 1000);
-
-        $this->assertSame($a, $b);
-    }
-
-    public function test_calc_skip_sweeps_varies_across_feeds_sharing_the_same_error(): void
-    {
-        $cronInterval = 900;
-
-        // Feeds erroring at the exact same instant (e.g. a shared rate-limit
-        // event) must not all draw the same skip - that's the whole point of
-        // randomizing it. Assert the stagger property across many synthetic
-        // feed IDs rather than just two, which would make the test flaky.
-        $skips = [];
-        for ($feedId = 1; $feedId <= 30; $feedId++) {
-            $skips[] = StatItem::calcSkipSweeps($feedId, 0, 100, 12345, $cronInterval, 1000);
-        }
-
-        $this->assertGreaterThan(1, count(array_unique($skips)), 'Expected skip to vary across feeds');
-    }
-
-    public function test_calc_skip_sweeps_ungrouped_matches_default_behavior(): void
-    {
-        $cronInterval = 900;
-
-        // groupSize of 1 (the default) must produce the exact same result
-        // whether or not a host is passed - host only matters once there's an
-        // actual group of 2+ feeds to coordinate.
-        $a = StatItem::calcSkipSweeps(5, 0, 5000, 42, $cronInterval, 1000);
-        $b = StatItem::calcSkipSweeps(5, 0, 5000, 42, $cronInterval, 1000, 0, 1, 'www.youtube.com');
+        $a = StatItem::calcSkipSweeps(0, 5000, $cronInterval, 1000, 2, 5, 'example.com');
+        $b = StatItem::calcSkipSweeps(0, 5000, $cronInterval, 1000, 2, 5, 'example.com');
 
         $this->assertSame($a, $b);
     }
@@ -801,7 +653,7 @@ final class AutoTTLStatsTest extends TestCase
 
         $skips = [];
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skips[] = StatItem::calcSkipSweeps(100, 0, 100, 12345, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
+            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
         }
 
         $this->assertCount($groupSize, array_unique($skips), 'Expected every member of a same-host group to get a distinct slot');
@@ -813,7 +665,7 @@ final class AutoTTLStatsTest extends TestCase
 
         $skips = [];
         foreach (['www.youtube.com', 'example.org', 'feeds.example.net', 'podcasts.example.com', 'news.example.io'] as $host) {
-            $skips[] = StatItem::calcSkipSweeps(1, 0, 100, 12345, $cronInterval, 1000, 0, 3, $host);
+            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, 0, 3, $host);
         }
 
         $this->assertGreaterThan(1, count(array_unique($skips)), 'Expected the rank-0 slot to vary across different host groups');
@@ -826,7 +678,7 @@ final class AutoTTLStatsTest extends TestCase
         $groupSize = 10;
 
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skip = StatItem::calcSkipSweeps(1, 0, 100, 12345, $cronInterval, $maxSweeps, $rank, $groupSize, 'www.youtube.com');
+            $skip = StatItem::calcSkipSweeps(0, 100, $cronInterval, $maxSweeps, $rank, $groupSize, 'www.youtube.com');
             $this->assertGreaterThanOrEqual(1, $skip);
             $this->assertLessThanOrEqual($maxSweeps, $skip);
         }
@@ -842,7 +694,7 @@ final class AutoTTLStatsTest extends TestCase
         // disperse into without collisions.
         $skips = [];
         for ($rank = 0; $rank < $groupSize; $rank++) {
-            $skips[] = StatItem::calcSkipSweeps(1, 0, 100, 12345, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
+            $skips[] = StatItem::calcSkipSweeps(0, 100, $cronInterval, 1000, $rank, $groupSize, 'www.youtube.com');
         }
 
         $this->assertCount($groupSize, array_unique($skips));
@@ -854,18 +706,19 @@ final class AutoTTLStatsTest extends TestCase
         $baseTTL = 3600;
         $cronInterval = 900;
         $maxTTL = 86400;
+        $groupSize = 3; // <= MIN_SKIP_SWEEPS, so the slot range isn't bumped past it
 
         // Fresh error: backoffTTL is baseTTL plus a random 0..(MIN_SKIP_SWEEPS-1)
         // extra sweeps.
-        for ($feedId = 1; $feedId <= 20; $feedId++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, 0, 100, 12345, true, $maxTTL, $cronInterval);
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, 100, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
             $this->assertGreaterThanOrEqual($baseTTL, $backoffTTL);
             $this->assertLessThanOrEqual($baseTTL + (StatItem::MIN_SKIP_SWEEPS - 1) * $cronInterval, $backoffTTL);
         }
 
         // Clamped at maxTTL however large errorAge grows.
-        for ($feedId = 1; $feedId <= 20; $feedId++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, 0, $maxTTL * 10, 999, true, $maxTTL, $cronInterval);
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, $maxTTL * 10, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
             $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
         }
     }
@@ -878,9 +731,10 @@ final class AutoTTLStatsTest extends TestCase
         $baseTTL = 80000;
         $cronInterval = 900;
         $maxTTL = 86400;
+        $groupSize = 3;
 
-        for ($feedId = 1; $feedId <= 20; $feedId++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, 0, $maxTTL * 10, 999, true, $maxTTL, $cronInterval);
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, 0, $maxTTL * 10, true, $maxTTL, $cronInterval, $rank, $groupSize, 'example.com');
             $this->assertGreaterThanOrEqual($baseTTL, $backoffTTL);
             $this->assertLessThanOrEqual($maxTTL, $backoffTTL);
         }
@@ -897,14 +751,14 @@ final class AutoTTLStatsTest extends TestCase
         $cronIntervalEstimate = 1200; // 20-minute cron
         $baseTTL = 300; // smaller than one cron interval
         $maxTTL = 86400;
+        $groupSize = 30;
 
         $stats = new AutoTTLStats(3600, $maxTTL, 100, 0, $cronLastHookTs, $cronIntervalEstimate);
         $lastAttempt = $now - $baseTTL; // due right about now, before backoff pushes it out
-        $lastError = $lastAttempt; // all feeds "erroring" at the same instant
 
         $dueSweeps = [];
-        for ($feedId = 1; $feedId <= 30; $feedId++) {
-            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $feedId, $lastAttempt - 1, $lastAttempt, $lastError, true, $maxTTL, $cronIntervalEstimate);
+        for ($rank = 0; $rank < $groupSize; $rank++) {
+            $backoffTTL = StatItem::calcBackoffTTL($baseTTL, $lastAttempt - 1, $lastAttempt, true, $maxTTL, $cronIntervalEstimate, $rank, $groupSize, 'example.com');
             $effectiveTTL = $stats->snapToNextSweep($lastAttempt, $backoffTTL);
             $dueSweeps[] = $lastAttempt + $effectiveTTL;
         }
@@ -1014,62 +868,6 @@ final class AutoTTLStatsTest extends TestCase
             // feedBeforeActualizeHook() calls sampleCronInterval(), which persists
             // to user config regardless of the instance-level pin above - reset it
             // so later tests reading init()'s state aren't order-dependent.
-            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
-            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
-            FreshRSS_Context::userConf()->save();
-        }
-    }
-
-    public function test_feed_before_actualize_backoff_excluded_feed_ignores_error_backoff(): void
-    {
-        $feed = null;
-        try {
-            $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
-            // Captured after the fetch so it's always >= wiremock's own "now" used
-            // to render the feed's entry dates (2 entries, 2 days ago and 2 days
-            // ago + 2 seconds); see test_get_avg_ttl_three_per_day for why.
-            $now = time();
-
-            $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
-            $metaInfo['path'] = dirname(__DIR__);
-            $ext = new AutoTTLExtension($metaInfo);
-            $ext->init();
-            $ext->defaultTTL = 3600;
-            $ext->maxTTL = 200000;
-            $ext->cronLastHookTs = 0;
-            $ext->cronIntervalEstimate = 0;
-
-            $feedDAO = FreshRSS_Factory::createFeedDao();
-
-            // Anchor lastAttempt (= lastError, since it's set after lastUpdate
-            // below) at $now - 115200: same cutoff test_get_avg_two_close() uses
-            // to deterministically get avgTTL/baseTTL = 28800s from this fixture.
-            $lastErrorTs = $now - 115200;
-            // errorAge = lastError - lastUpdate = 150000s, which lands the
-            // bootstrap backoff formula (cronInterval == 0) at backoffTTL =
-            // errorAge = 150000s (baseTTL <= errorAge <= maxTTL).
-            $lastUpdateTs = $lastErrorTs - 150000;
-
-            $feedDAO->updateLastUpdate($feed->id(), $lastUpdateTs);
-            $feedDAO->updateLastError($feed->id(), $lastErrorTs);
-            $feed = $feedDAO->searchById($feed->id());
-
-            // Elapsed since lastAttempt is ~115200s: greater than baseTTL
-            // (28800s) but less than backoffTTL (150000s). With back-off
-            // enabled, that must throttle the feed...
-            $result = $ext->feedBeforeActualizeHook($feed);
-            $this->assertNull($result);
-
-            // ...but with the feed excluded, back-off no longer applies and the
-            // gate falls back to baseTTL alone, which elapsed time exceeds.
-            $ext->backoffExcludedFeeds = [$feed->id()];
-            $result = $ext->feedBeforeActualizeHook($feed);
-            $this->assertNotNull($result);
-            $this->assertSame($feed->id(), $result->id());
-        } finally {
-            if ($feed !== null) {
-                FreshRSS_feed_Controller::deleteFeed($feed->id());
-            }
             FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', 0);
             FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', 0);
             FreshRSS_Context::userConf()->save();
@@ -1250,8 +1048,13 @@ final class AutoTTLStatsTest extends TestCase
         }
     }
 
-    public function test_get_backoff_ttl_staggers_errored_feeds_when_cron_known(): void
+    public function test_get_backoff_ttl_is_deterministic_per_feed(): void
     {
+        // Staggering across feeds sharing a host is covered directly by
+        // test_calc_skip_sweeps_same_host_group_gets_distinct_slots and
+        // test_get_backoff_ttl_coordinates_feeds_sharing_a_host below; this
+        // test just confirms getBackoffTTL() itself is stable across repeated
+        // calls for the same feed state.
         $feed = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
@@ -1272,21 +1075,8 @@ final class AutoTTLStatsTest extends TestCase
 
             $baseTTL = 3600;
 
-            // Deterministic per feed+lastError: calling twice for the same feed
-            // returns the same value.
             $backoff = $ext->getBackoffTTL($feed, $baseTTL);
             $this->assertSame($backoff, $ext->getBackoffTTL($feed, $baseTTL));
-
-            // The skip is per-feed, so two feeds erroring at the same instant
-            // should generally be staggered. Any two specific feed IDs have a
-            // low chance of colliding on the same skip, so assert the stagger
-            // property across many synthetic feed IDs via the pure calculator
-            // instead, which would make a two-feed assertion flaky.
-            $skips = [];
-            for ($syntheticFeedId = 1; $syntheticFeedId <= 30; $syntheticFeedId++) {
-                $skips[] = StatItem::calcSkipSweeps($syntheticFeedId, $now - 86400, $errorTime, $errorTime, 900, 96);
-            }
-            $this->assertGreaterThan(1, count(array_unique($skips)), 'Expected skip to vary across feeds');
         } finally {
             if ($feed !== null) {
                 FreshRSS_feed_Controller::deleteFeed($feed->id());
@@ -1339,8 +1129,15 @@ final class AutoTTLStatsTest extends TestCase
     public function test_feed_before_actualize_effective_ttl_aligned_to_sweep_grid_when_learned(): void
     {
         $feed = null;
+        $sibling = null;
         try {
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/three_per_day.xml');
+            // A second feed sharing the same host and erroring at the same
+            // instant forms a real back-off group, so calcSkipSweeps() actually
+            // adds whole-sweep skips on top of baseTTL below - without a
+            // sibling, groupSize stays 1 and back-off never applies (see
+            // StatItem::calcBackoffTTL).
+            $sibling = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/two_close.xml');
 
             $metaInfo = json_decode((string) file_get_contents(dirname(__DIR__) . '/metadata.json'), true);
             $metaInfo['path'] = dirname(__DIR__);
@@ -1355,10 +1152,12 @@ final class AutoTTLStatsTest extends TestCase
             $ext->cronIntervalEstimate = 900;
 
             $feedDAO = FreshRSS_Factory::createFeedDao();
-            // lastUpdate far enough back, and a more recent lastError, that the
-            // feed is erroring - so the random skip applies on top of the base TTL.
-            $feedDAO->updateLastUpdate($feed->id(), $now - 86400);
-            $feedDAO->updateLastError($feed->id(), $now - 5000);
+            // lastUpdate far enough back, and a more recent lastError, that both
+            // feeds are erroring - so the random skip applies on top of the base TTL.
+            foreach ([$feed, $sibling] as $f) {
+                $feedDAO->updateLastUpdate($f->id(), $now - 86400);
+                $feedDAO->updateLastError($f->id(), $now - 5000);
+            }
             $feed = $feedDAO->searchById($feed->id());
 
             // Whatever skip sweeps resolve to, getBackoffTTL() must land exactly
@@ -1371,8 +1170,10 @@ final class AutoTTLStatsTest extends TestCase
             $dueTime = $lastAttempt + $backoffTTL;
             $this->assertSame(0, ($dueTime - $ext->cronLastHookTs) % $ext->cronIntervalEstimate);
         } finally {
-            if ($feed !== null) {
-                FreshRSS_feed_Controller::deleteFeed($feed->id());
+            foreach ([$feed, $sibling] as $f) {
+                if ($f !== null) {
+                    FreshRSS_feed_Controller::deleteFeed($f->id());
+                }
             }
         }
     }
