@@ -37,6 +37,16 @@
 				body: body,
 			}).catch(function () {}).then(function () {
 				return refresh(root);
+			}).then(function () {
+				// openNotification() is FreshRSS core's own toast (p/scripts/main.js),
+				// already loaded/initialized on every admin page - reuse it instead of
+				// adding our own notification markup/CSS. redirect: 'manual' above
+				// means a successful save surfaces as an opaque redirect response, not
+				// a checkable status, so there's no reliable way to detect failure here
+				// to show a 'bad' notification instead.
+				if (typeof openNotification === 'function') {
+					openNotification('Saved', 'good');
+				}
 			});
 		});
 	}
@@ -53,6 +63,19 @@
 
 		event.preventDefault();
 		submitInBackground(button.getAttribute('formaction'), new FormData(button.form), root);
+	});
+
+	// The Max TTL <select> and Statistics table rows <input> used to auto-submit
+	// via an inline onchange="" attribute, but a strict CSP (default-src 'self'
+	// with no 'unsafe-inline'/nonce for script-src) silently blocks inline event
+	// handlers - see issue #53. Wiring the same behaviour up here instead keeps
+	// it CSP-safe, same reasoning as the external stylesheet link above.
+	document.addEventListener('change', function (event) {
+		var el = event.target;
+		if (!el.matches || !el.matches('[data-autottl-live-submit]') || !el.form) {
+			return;
+		}
+		el.form.requestSubmit();
 	});
 
 	document.addEventListener('submit', function (event) {
