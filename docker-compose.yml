@@ -52,6 +52,17 @@ services:
       timeout: 5s
       retries: 10
 
+  caddy:
+    image: caddy:latest
+    restart: unless-stopped
+    depends_on:
+      freshrss:
+        condition: service_healthy
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    ports:
+      - "443:443"
+
   composer:
     image: composer
     user: ${USER_ID}:${GROUP_ID}

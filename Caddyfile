@@ -1,0 +1,4 @@
+autottl.localhost {
+	tls internal
+	reverse_proxy freshrss:80
+}

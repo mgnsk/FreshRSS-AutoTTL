@@ -21,7 +21,7 @@
 		<div class="form-group">
 			<label class="group-name" for="auto_ttl_max_ttl">Max TTL</label>
 			<div class="group-controls">
-				<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" onchange="this.form.requestSubmit()" required="required">
+				<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" data-autottl-live-submit="1" required="required">
 	                <?php
 	                    $ttlValues = [
 	                        1200 => '20min',
@@ -66,7 +66,7 @@
 			</div>
 			<label class="group-name" for="auto_ttl_stats_count">Statistics table rows</label>
 			<div class="group-controls">
-				<input type="number" min="1" value="<?php echo $this->statsCount; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" onchange="this.form.requestSubmit()" required="required" />
+				<input type="number" min="1" value="<?php echo $this->statsCount; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" data-autottl-live-submit="1" required="required" />
 			</div>
 		</div>
 
