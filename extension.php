@@ -1,6 +1,13 @@
 <?php
 
-require_once __DIR__.'/stats.php';
+require_once __DIR__.'/src/ErrorGroupInfo.php';
+require_once __DIR__.'/src/AutoTTLConfig.php';
+require_once __DIR__.'/src/FeedAttempt.php';
+require_once __DIR__.'/src/BackoffCalculator.php';
+require_once __DIR__.'/src/StatItem.php';
+require_once __DIR__.'/src/CronEstimate.php';
+require_once __DIR__.'/src/CronIntervalEstimator.php';
+require_once __DIR__.'/src/AutoTTLStats.php';
 
 class AutoTTLExtension extends Minz_Extension
 {
@@ -69,7 +76,9 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL, $this->cronLastHookTs, $this->cronIntervalEstimate);
+            $this->stats = new AutoTTLStats(new AutoTTLConfig(
+                $this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL, $this->cronLastHookTs, $this->cronIntervalEstimate
+            ));
         }
 
         return $this->stats;
@@ -85,35 +94,30 @@ class AutoTTLExtension extends Minz_Extension
         $now = time();
         $result = CronIntervalEstimator::updateEstimate($now, $this->cronLastHookTs, $this->cronIntervalEstimate);
 
-        if ($result['lastHookTs'] !== $this->cronLastHookTs) {
+        if ($result->lastHookTs !== $this->cronLastHookTs) {
             // Only touches disk when a new sweep was actually detected (or on
             // this user's very first-ever sample) - not once per feed.
-            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', $result['lastHookTs']);
-            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', $result['estimate']);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_last_hook_ts', $result->lastHookTs);
+            FreshRSS_Context::userConf()->_attribute('auto_ttl_cron_interval_estimate', $result->estimate);
             FreshRSS_Context::userConf()->save();
         }
 
-        $this->cronLastHookTs = $result['lastHookTs'];
-        $this->cronIntervalEstimate = $result['estimate'];
+        $this->cronLastHookTs = $result->lastHookTs;
+        $this->cronIntervalEstimate = $result->estimate;
     }
 
     public function getBackoffTTL(FreshRSS_Feed $feed, int $baseTTL): int
     {
-        $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
-        $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
+        $attempt = FeedAttempt::fromTimestamps($feed->lastUpdate(), $feed->lastError());
 
         // Only touches the host-group query when it can matter: an erroring
         // feed. A healthy sweep never pays for it.
-        $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
-        if ($isErroring) {
-            $groupInfo = $this->getStats()->getGroupInfoForFeed($feed->id());
+        $group = new ErrorGroupInfo();
+        if ($attempt->isErroring) {
+            $group = $this->getStats()->getGroupInfoForFeed($feed->id());
         }
 
-        return StatItem::calcBackoffTTL(
-            $baseTTL, $feed->lastUpdate(), $lastAttempt,
-            $isErroring, $this->maxTTL, $this->cronIntervalEstimate,
-            $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']
-        );
+        return BackoffCalculator::calcBackoffTTL($baseTTL, $attempt, $this->maxTTL, $this->cronIntervalEstimate, $group);
     }
 
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
@@ -130,7 +134,7 @@ class AutoTTLExtension extends Minz_Extension
 
         $this->sampleCronInterval();
 
-        $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
+        $lastAttempt = FeedAttempt::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         if ($lastAttempt === 0) {
             Minz_Log::debug(
                 sprintf(
