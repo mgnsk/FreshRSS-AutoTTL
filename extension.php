@@ -22,11 +22,6 @@ class AutoTTLExtension extends Minz_Extension
     public int $cronLastHookTs;
 
     /**
-     * @var array<int, int>
-     */
-    public array $backoffExcludedFeeds;
-
-    /**
      * @var AutoTTLStats
      */
     private $stats;
@@ -40,14 +35,6 @@ class AutoTTLExtension extends Minz_Extension
             'feedBeforeActualizeHook',
         ]);
         $this->registerTranslates();
-        // Handles the per-feed "disable back-off" switch button on the configure
-        // page (Controllers/backoffController.php) - see issue #50.
-        $this->registerController('backoff');
-        // Submits the configure page's form/switch buttons via fetch instead of
-        // a real navigation, so toggling back-off (or changing Max TTL/stats
-        // rows) refreshes the panel in place instead of breaking out of
-        // FreshRSS's slider when this page is opened there.
-        Minz_View::appendScript($this->getFileUrl('configure.js'));
 
         $this->defaultTTL = FreshRSS_Context::userConf()->attributeInt('ttl_default') ?? FreshRSS_Feed::TTL_DEFAULT;
         $this->maxTTL = FreshRSS_Context::userConf()->attributeInt('auto_ttl_max_ttl') ?? self::MAX_TTL;
@@ -63,10 +50,6 @@ class AutoTTLExtension extends Minz_Extension
         // sampleCronInterval().
         $this->cronLastHookTs = FreshRSS_Context::userConf()->attributeInt('auto_ttl_cron_last_hook_ts') ?? 0;
         $this->cronIntervalEstimate = FreshRSS_Context::userConf()->attributeInt('auto_ttl_cron_interval_estimate') ?? 0;
-
-        // Feeds excluded from error back-off (still get normal AutoTTL TTL
-        // adjustment, just never throttled further by errors) - see issue #50.
-        $this->backoffExcludedFeeds = array_map('intval', FreshRSS_Context::userConf()->attributeArray('auto_ttl_backoff_excluded_feeds') ?? []);
     }
 
     /*
@@ -79,9 +62,6 @@ class AutoTTLExtension extends Minz_Extension
         if (Minz_Request::isPost()) {
             FreshRSS_Context::userConf()->_attribute('auto_ttl_max_ttl', Minz_Request::paramInt('auto_ttl_max_ttl'));
             FreshRSS_Context::userConf()->_attribute('auto_ttl_stats_count', Minz_Request::paramInt('auto_ttl_stats_count'));
-            // auto_ttl_backoff_excluded_feeds is managed entirely by the per-feed
-            // switch button (Controllers/backoffController.php), not this form -
-            // it must not be touched here.
             FreshRSS_Context::userConf()->save();
         }
     }
@@ -89,7 +69,7 @@ class AutoTTLExtension extends Minz_Extension
     public function getStats(): AutoTTLStats
     {
         if ($this->stats === null) {
-            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL, $this->cronLastHookTs, $this->cronIntervalEstimate, $this->backoffExcludedFeeds);
+            $this->stats = new AutoTTLStats($this->defaultTTL, $this->maxTTL, $this->statsCount, $this->minTTL, $this->cronLastHookTs, $this->cronIntervalEstimate);
         }
 
         return $this->stats;
@@ -121,19 +101,18 @@ class AutoTTLExtension extends Minz_Extension
     {
         $lastAttempt = StatItem::calcLastAttempt($feed->lastUpdate(), $feed->lastError());
         $isErroring = StatItem::calcIsErroring($feed->lastUpdate(), $feed->lastError());
-        $backoffEnabled = !in_array($feed->id(), $this->backoffExcludedFeeds, true);
 
         // Only touches the host-group query when it can matter: an erroring
-        // feed under cron-aware backoff. A healthy sweep never pays for it.
+        // feed. A healthy sweep never pays for it.
         $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
-        if ($isErroring && $backoffEnabled && $this->cronIntervalEstimate > 0) {
+        if ($isErroring) {
             $groupInfo = $this->getStats()->getGroupInfoForFeed($feed->id());
         }
 
         return StatItem::calcBackoffTTL(
-            $baseTTL, $feed->id(), $feed->lastUpdate(), $lastAttempt, $feed->lastError(),
+            $baseTTL, $feed->lastUpdate(), $lastAttempt,
             $isErroring, $this->maxTTL, $this->cronIntervalEstimate,
-            $groupInfo['rank'], $groupInfo['size'], $groupInfo['host'], $backoffEnabled
+            $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']
         );
     }
 

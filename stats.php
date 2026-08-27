@@ -32,9 +32,7 @@ class StatItem
 
     public int $avgTTL;
 
-    public bool $backoffEnabled;
-
-    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, int $groupRank = 0, int $groupSize = 1, string $host = '', bool $backoffEnabled = true)
+    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, int $groupRank = 0, int $groupSize = 1, string $host = '')
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
@@ -43,41 +41,37 @@ class StatItem
         $this->lastAttempt = self::calcLastAttempt($this->lastUpdate, $this->lastError);
         $this->isErroring = self::calcIsErroring($this->lastUpdate, $this->lastError);
         $this->baseTTL = $baseTTL;
-        $this->backoffEnabled = $backoffEnabled;
-        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->id, $this->lastUpdate, $this->lastAttempt, $this->lastError, $this->isErroring, $maxTTL, $cronIntervalEstimate, $groupRank, $groupSize, $host, $backoffEnabled);
+        $this->backoffTTL = self::calcBackoffTTL($baseTTL, $this->lastUpdate, $this->lastAttempt, $this->isErroring, $maxTTL, $cronIntervalEstimate, $groupRank, $groupSize, $host);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
     }
 
     /*
      * Random number of sweeps (>= 1) an erroring feed skips beyond baseTTL's own
-     * sweep, deterministic per feed+lastError - stable across repeated hook calls
-     * within the same error episode, but reshuffled whenever the feed errors again.
+     * sweep. Only ever called for a feed that is part of a shared-host error
+     * group (groupSize > 1, e.g. many YouTube channel feeds erroring together on
+     * a rate limit) - see calcBackoffTTL(), which gates backoff on group
+     * membership before reaching here.
      *
      * The random range grows with how long the feed has been failing (errorAge in
-     * whole sweeps), clamped to maxSweeps, so a feed that keeps failing gets both a
-     * wider possible spread and a longer expected wait over time, without needing
+     * whole sweeps), clamped to maxSweeps, so a group that keeps failing gets both
+     * a wider possible spread and a longer expected wait over time, without needing
      * to persist an attempt counter. MIN_SKIP_SWEEPS floors the range even on a
      * fresh error, and maxSweeps caps it even when MIN_SKIP_SWEEPS would otherwise
      * exceed it (a coarse cron relative to maxTTL) - either way, skip never exceeds
      * maxSweeps, preserving the same eventual-retry guarantee maxTTL provides today.
      *
-     * groupRank/groupSize/host coordinate feeds sharing a host (e.g. many YouTube
-     * channel feeds erroring together on a rate limit): when groupSize > 1, the
-     * range is bumped to fit the whole group and each member's rank claims a
-     * distinct slot, instead of leaving dispersal to independent hash luck - see
-     * AutoTTLStats::getErrorHostGroups(). groupSize <= 1 (lone feed, or a feed
-     * whose URL host couldn't be determined) falls back to the plain per-feed hash.
+     * The range is bumped to fit the whole group and each member's groupRank
+     * claims a distinct slot within it, instead of leaving dispersal to hash luck
+     * - see AutoTTLStats::getErrorHostGroups(). hostOffset gives each host group a
+     * distinct per-host offset so different host groups don't all default to slot
+     * 0 for their rank-0 member.
      */
-    public static function calcSkipSweeps(int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, int $cronInterval, int $maxSweeps, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
+    public static function calcSkipSweeps(int $lastUpdate, int $lastAttempt, int $cronInterval, int $maxSweeps, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
     {
         $errorAge = $lastAttempt - $lastUpdate;
         $range = min($maxSweeps, max(self::MIN_SKIP_SWEEPS, intdiv($errorAge, $cronInterval)));
         $range = max(1, $range);
-
-        if ($groupSize <= 1) {
-            return 1 + (int) (abs(crc32($feedId . '_' . $lastError)) % $range);
-        }
 
         // Bump the range so a large simultaneous group actually gets enough
         // distinct slots to spread into, still capped at maxSweeps.
@@ -135,13 +129,14 @@ class StatItem
      * (calcAdjustedTTL's defaultTTL > maxTTL escape hatch) - an errored feed
      * must never be checked more eagerly than a healthy one.
      *
-     * backoffEnabled lets a feed be opted out of back-off entirely (per-feed
-     * exclusion list, see AutoTTLExtension::$backoffExcludedFeeds) - it then
-     * always returns baseTTL, same as a non-erroring feed.
+     * groupSize <= 1 means no other AutoTTL-managed feed is currently erroring
+     * on the same host (see AutoTTLStats::getErrorHostGroups()) - back-off only
+     * exists to spread out a shared-host pile-up, so a lone erroring feed always
+     * returns baseTTL unchanged, same as a non-erroring feed.
      */
-    public static function calcBackoffTTL(int $baseTTL, int $feedId, int $lastUpdate, int $lastAttempt, int $lastError, bool $isErroring, int $maxTTL, int $cronInterval = 0, int $groupRank = 0, int $groupSize = 1, string $host = '', bool $backoffEnabled = true): int
+    public static function calcBackoffTTL(int $baseTTL, int $lastUpdate, int $lastAttempt, bool $isErroring, int $maxTTL, int $cronInterval = 0, int $groupRank = 0, int $groupSize = 1, string $host = ''): int
     {
-        if (!$backoffEnabled || !$isErroring) {
+        if (!$isErroring || $groupSize <= 1) {
             return $baseTTL;
         }
 
@@ -151,7 +146,7 @@ class StatItem
             // result below can overshoot maxTTL.
             $headroom = $maxTTL - $baseTTL;
             $maxSweeps = $headroom > 0 ? max(1, intdiv($headroom, $cronInterval) + 1) : 1;
-            $skipSweeps = self::calcSkipSweeps($feedId, $lastUpdate, $lastAttempt, $lastError, $cronInterval, $maxSweeps, $groupRank, $groupSize, $host);
+            $skipSweeps = self::calcSkipSweeps($lastUpdate, $lastAttempt, $cronInterval, $maxSweeps, $groupRank, $groupSize, $host);
 
             return max($baseTTL, min($maxTTL, $baseTTL + ($skipSweeps - 1) * $cronInterval));
         }
@@ -234,15 +229,7 @@ class AutoTTLStats extends Minz_ModelPdo
      */
     private $errorHostGroups = null;
 
-    /**
-     * @var array<int, int>
-     */
-    private $backoffExcludedFeeds;
-
-    /**
-     * @param array<int, int> $backoffExcludedFeeds Feed ids excluded from error back-off - see AutoTTLExtension::$backoffExcludedFeeds.
-     */
-    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0, int $cronLastHookTs = 0, int $cronIntervalEstimate = 0, array $backoffExcludedFeeds = [])
+    public function __construct(int $defaultTTL, int $maxTTL, int $statsCount, int $minTTL = 0, int $cronLastHookTs = 0, int $cronIntervalEstimate = 0)
     {
         parent::__construct();
 
@@ -252,12 +239,6 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->minTTL = $minTTL;
         $this->cronLastHookTs = $cronLastHookTs;
         $this->cronIntervalEstimate = $cronIntervalEstimate;
-        $this->backoffExcludedFeeds = $backoffExcludedFeeds;
-    }
-
-    private function isBackoffExcluded(int $feedId): bool
-    {
-        return in_array($feedId, $this->backoffExcludedFeeds, true);
     }
 
     public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0): int
@@ -388,14 +369,6 @@ FROM `_feed` AS feed
 WHERE feed.ttl = 0 AND feed.error > 1 AND feed.error > feed.`lastUpdate`
 SQL;
 
-        if ($this->backoffExcludedFeeds !== []) {
-            // Excluded feeds don't back off at all, so they shouldn't consume or
-            // skew a group slot meant for feeds actually spreading out a shared
-            // rate-limit event - see calcSkipSweeps().
-            $excludedIds = implode(',', array_map('intval', $this->backoffExcludedFeeds));
-            $sql .= " AND feed.id NOT IN ({$excludedIds})";
-        }
-
         $stm = $this->pdo->query($sql);
         if ($stm === false) {
             Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($this->pdo->errorInfo()));
@@ -473,14 +446,13 @@ SQL;
                 $lastAttemptTs = StatItem::calcLastAttempt((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
                 $isErroring = StatItem::calcIsErroring((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
                 $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $lastAttemptTs);
-                $backoffEnabled = !$this->isBackoffExcluded((int) $feed['id']);
 
                 $groupInfo = ['rank' => 0, 'size' => 1, 'host' => ''];
-                if ($isErroring && $backoffEnabled && $this->cronIntervalEstimate > 0) {
+                if ($isErroring) {
                     $groupInfo = $this->getGroupInfoForFeed((int) $feed['id']);
                 }
 
-                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL, $this->cronIntervalEstimate, $groupInfo['rank'], $groupInfo['size'], $groupInfo['host'], $backoffEnabled);
+                $list[] = new StatItem($feed, $baseTTL, $this->maxTTL, $this->cronIntervalEstimate, $groupInfo['rank'], $groupInfo['size'], $groupInfo['host']);
             }
 
             return $list;

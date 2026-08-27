@@ -3,7 +3,6 @@ parameters:
     paths:
         - extension.php
         - stats.php
-        - Controllers
         - tests
     scanDirectories:
         - vendor/freshrss.org/freshrss/lib

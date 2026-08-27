@@ -1,11 +1,10 @@
-<div id="freshrss-autottl-configure" data-refresh-url="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>&amp;ajax=1">
+<div id="freshrss-autottl-configure">
 	<?php
 		/* FreshRSS opens this page inside its #slider panel via an AJAX fetch
 		   that only copies response.body.innerHTML into the DOM (see
 		   open_slider_listener() in FreshRSS's extra.js) - any <head>-level
-		   <link>/<style> never survives that. Same goes for configure.js's own
-		   partial refresh. The stylesheet must be linked from within the markup
-		   itself so it travels along with every fetch path.
+		   <link>/<style> never survives that. The stylesheet must be linked
+		   from within the markup itself so it travels along with that fetch.
 
 		   This must be an external stylesheet, not an inline <style> block:
 		   deployments that send a Content-Security-Policy without
@@ -21,7 +20,7 @@
 		<div class="form-group">
 			<label class="group-name" for="auto_ttl_max_ttl">Max TTL</label>
 			<div class="group-controls">
-				<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" data-autottl-live-submit="1" required="required">
+				<select class="w50" name="auto_ttl_max_ttl" id="auto_ttl_max_ttl" required="required">
 	                <?php
 	                    $ttlValues = [
 	                        1200 => '20min',
@@ -66,7 +65,13 @@
 			</div>
 			<label class="group-name" for="auto_ttl_stats_count">Statistics table rows</label>
 			<div class="group-controls">
-				<input type="number" min="1" value="<?php echo $this->statsCount; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" data-autottl-live-submit="1" required="required" />
+				<input type="number" min="1" value="<?php echo $this->statsCount; ?>" class="w50" name="auto_ttl_stats_count" id="auto_ttl_stats_count" required="required" />
+			</div>
+		</div>
+
+		<div class="form-group form-actions">
+			<div class="group-controls">
+				<button type="submit" class="btn btn-important"><?= _t('gen.action.submit') ?></button>
 			</div>
 		</div>
 
@@ -95,7 +100,6 @@
 					<th>Adjusted update TTL</th>
 					<th>Last update</th>
 					<th>Time until next update</th>
-					<th>Back-off</th>
 				</thead>
 				<tbody>
 				<?php foreach ($feedsUsingAutoTTL as $feed) { ?>
@@ -109,22 +113,13 @@
 					</td>
 					<td>
 						<?php $ttl = $feed->isErroring ? $feed->backoffTTL : $feed->baseTTL; ?>
-						<?= $this->getStats()->humanIntervalFromSeconds($ttl) ?><?= ($feed->isErroring && $feed->backoffEnabled) ? ' (error backoff)' : '' ?>
+						<?= $this->getStats()->humanIntervalFromSeconds($ttl) ?><?= ($feed->isErroring && $feed->backoffTTL > $feed->baseTTL) ? ' (error backoff)' : '' ?>
 					</td>
 					<td>
 						<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
 					</td>
 					<td>
 						<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $feed->backoffTTL, $now) ?>
-					</td>
-					<td>
-						<?php $backoffExcluded = in_array($feed->id, $this->backoffExcludedFeeds, true); ?>
-						<button
-							class="switch<?= $backoffExcluded ? '' : ' active' ?>"
-							data-autottl-backoff-toggle="1"
-							formaction="<?= _url('backoff', 'toggle', 'id', $feed->id, 'e', urlencode($this->getName())) ?>"
-							title="<?= $backoffExcluded ? 'Enable back-off' : 'Disable back-off' ?>"
-						></button>
 					</td>
 				</tr>
 				<?php } ?>
