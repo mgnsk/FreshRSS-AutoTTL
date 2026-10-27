@@ -4,11 +4,6 @@ class AutoTTLStats extends Minz_ModelPdo
 {
     private readonly AutoTTLConfig $config;
 
-    /**
-     * @var ?array<int, ErrorGroupInfo>
-     */
-    private $errorHostGroups = null;
-
     public function __construct(AutoTTLConfig $config)
     {
         parent::__construct();
@@ -47,10 +42,8 @@ class AutoTTLStats extends Minz_ModelPdo
      * already-due feed must resolve to that one, never to the following one -
      * see predictedSweepAtOrAfter().
      *
-     * Public so callers combining calcAdjustedTTL()'s result with further TTL
-     * adjustments - namely the bootstrap error backoff formula - can
-     * re-snap the final total the same way, since it can push lastAttempt + ttl
-     * past the sweep boundary calcAdjustedTTL() already snapped it to.
+     * Public so formatTimeUntilNextUpdate() can snap a feed's own configured
+     * TTL (feeds not using AutoTTL) the same way.
      */
     public function snapToNextSweep(int $lastAttempt, int $ttl): int
     {
@@ -115,67 +108,6 @@ SQL;
         return $this->calcAdjustedTTL(0, $lastUpdate);
     }
 
-    /*
-     * Groups currently-erroring, AutoTTL-managed feeds by their URL's exact
-     * hostname, so calcSkipSweeps() can hand out distinct sweep slots to feeds
-     * sharing a rate-limited host instead of relying on independent hash luck.
-     * Computed lazily and memoized for the lifetime of this instance - i.e. once
-     * per sweep, since AutoTTLExtension::getStats() reuses a single instance
-     * across all feeds in a request - and only queried at all once something
-     * actually calls getGroupInfoForFeed().
-     *
-     * Feeds still on the legacy error sentinel (no real error timestamp) are
-     * excluded; they fall back to the ungrouped per-feed hash, same as feeds
-     * whose URL host can't be determined (each gets its own singleton group,
-     * keyed by feed id so it can never collide with a real hostname).
-     *
-     * @return array<int, ErrorGroupInfo>
-     */
-    private function getErrorHostGroups(): array
-    {
-        if ($this->errorHostGroups !== null) {
-            return $this->errorHostGroups;
-        }
-        $this->errorHostGroups = [];
-
-        $sql = <<<SQL
-SELECT feed.id, feed.url
-FROM `_feed` AS feed
-WHERE feed.ttl = 0 AND feed.error > 1 AND feed.error > feed.`lastUpdate`
-SQL;
-
-        $stm = $this->pdo->query($sql);
-        if ($stm === false) {
-            Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($this->pdo->errorInfo()));
-
-            return $this->errorHostGroups;
-        }
-
-        $byGroupKey = [];
-        foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $row) {
-            $feedId = (int) $row['id'];
-            $host = parse_url((string) $row['url'], PHP_URL_HOST);
-            $groupKey = (is_string($host) && $host !== '') ? strtolower($host) : ('#feed:' . $feedId);
-            $byGroupKey[$groupKey][] = $feedId;
-        }
-
-        foreach ($byGroupKey as $groupKey => $feedIds) {
-            sort($feedIds); // stable ascending rank
-            $size = count($feedIds);
-            $host = str_starts_with($groupKey, '#feed:') ? '' : $groupKey;
-            foreach ($feedIds as $rank => $feedId) {
-                $this->errorHostGroups[$feedId] = new ErrorGroupInfo($rank, $size, $host);
-            }
-        }
-
-        return $this->errorHostGroups;
-    }
-
-    public function getGroupInfoForFeed(int $feedId): ErrorGroupInfo
-    {
-        return $this->getErrorHostGroups()[$feedId] ?? new ErrorGroupInfo();
-    }
-
     public function getFeedStats(bool $usesAutoTTL): array
     {
         $where = '';
@@ -195,6 +127,8 @@ SQL;
 SELECT
     feed.id,
     feed.name,
+    feed.url,
+    feed.attributes,
     feed.`lastUpdate`,
     feed.error,
     feed.ttl,
@@ -218,12 +152,7 @@ SQL;
                 $attempt = FeedAttempt::fromTimestamps((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
                 $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $attempt->lastAttempt);
 
-                $groupInfo = new ErrorGroupInfo();
-                if ($attempt->isErroring) {
-                    $groupInfo = $this->getGroupInfoForFeed((int) $feed['id']);
-                }
-
-                $list[] = new StatItem($feed, $baseTTL, $this->config->maxTTL, $this->config->cronIntervalEstimate, $groupInfo);
+                $list[] = new StatItem($feed, $baseTTL);
             }
 
             return $list;
@@ -253,13 +182,17 @@ SQL;
             return 'never attempted';
         }
 
-        // $ttl already lands on a predicted sweep when the cron interval is known
-        // (calcAdjustedTTL()/calcBackoffTTL() both snap by construction), but the
-        // bootstrap backoff formula (cron interval not yet learned) doesn't;
-        // re-snap so the displayed countdown always reaches zero on an actual
-        // sweep, matching what feedBeforeActualizeHook() does with the same value.
+        // An adjusted TTL already lands on a predicted sweep, but a feed's own
+        // configured TTL doesn't; snap so the displayed countdown always reaches
+        // zero on an actual sweep.
         $effectiveTTL = $this->snapToNextSweep($feed->attempt->lastAttempt, $ttl);
         $timeUntil = $feed->attempt->lastAttempt + $effectiveTTL - $now;
+
+        // FreshRSS's own Retry-After pause (after a 429/503) blocks the fetch
+        // until it expires, even when the TTL is already due.
+        if ($feed->retryAfter > $now && $feed->retryAfter - $now > $timeUntil) {
+            return 'rate limited, retry in ' . self::humanIntervalFromSeconds($feed->retryAfter - $now);
+        }
 
         $suffix = $feed->attempt->isErroring ? ' (in error)' : '';
 

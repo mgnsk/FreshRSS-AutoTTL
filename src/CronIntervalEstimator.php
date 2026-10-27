@@ -23,7 +23,7 @@ class CronIntervalEstimator
         // New sweep detected. Ratchet up immediately on a bigger gap (safe
         // to trust right away - a gap that big really did happen); ease
         // down gradually on a smaller one, so a single fast fluke doesn't
-        // instantly undercut backoff for erroring feeds.
+        // instantly pull every predicted sweep too early.
         $newEstimate = $gap > $estimate
             ? $gap
             : (int) (0.7 * $estimate + 0.3 * $gap);

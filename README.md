@@ -34,6 +34,17 @@ invocations across sweeps. Once learned, it rounds each feed's computed TTL forw
 sweep rather than sometime before it, so the "time until next update" shown on the stats page counts down to roughly
 zero right as your cron actually runs the feed, instead of sitting on "pending" for the remainder of the interval.
 
+# Erroring and rate-limited feeds
+
+A feed whose last fetch failed is retried on its normal adjusted TTL, counted from the failed attempt. AutoTTL adds
+no back-off of its own, so a feed recovers soon after its upstream is fixed.
+
+Rate limiting is left to FreshRSS itself: on an HTTP `429 Too Many Requests` or `503 Service Unavailable` response it
+pauses fetching until the `Retry-After` time (or `limits.retry_after_default`, 10 minutes by default, when the header is
+missing). Since FreshRSS 1.30 that pause covers the whole domain for public servers, and just the one URL for servers
+on a local network. AutoTTL skips paused feeds quietly instead of letting FreshRSS mark them as errored on every
+sweep, and the stats page shows them as "rate limited".
+
 # Testing
 
 ## Manually

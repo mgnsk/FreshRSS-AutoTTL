@@ -4,21 +4,21 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "02e8edc5755b18bd2fa3b929be28ab70",
+    "content-hash": "c93232226eab19cd476ea56a9030a3f2",
     "packages": [],
     "packages-dev": [
         {
             "name": "freshrss.org/freshrss",
-            "version": "1.29.1",
+            "version": "1.30.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/FreshRSS/FreshRSS.git",
-                "reference": "b2c50115baa36c217e939ee3ea8ecfae52f91abd"
+                "reference": "08f97bd497ace733c151ea1c709d85cd5b65cc53"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/FreshRSS/FreshRSS/zipball/b2c50115baa36c217e939ee3ea8ecfae52f91abd",
-                "reference": "b2c50115baa36c217e939ee3ea8ecfae52f91abd",
+                "url": "https://api.github.com/repos/FreshRSS/FreshRSS/zipball/08f97bd497ace733c151ea1c709d85cd5b65cc53",
+                "reference": "08f97bd497ace733c151ea1c709d85cd5b65cc53",
                 "shasum": ""
             },
             "require": {
@@ -49,7 +49,7 @@
                 "ext-tokenizer": "*",
                 "ext-xmlwriter": "*",
                 "php": ">=8.1",
-                "phpstan/phpstan": "^2.1",
+                "phpstan/phpstan": "^2.2",
                 "phpstan/phpstan-deprecation-rules": "^2.0",
                 "phpstan/phpstan-phpunit": "^2.0",
                 "phpstan/phpstan-strict-rules": "^2.0",
@@ -82,7 +82,7 @@
                     "phpstan analyse --memory-limit 512M -c phpstan-next.neon ."
                 ],
                 "phpunit": [
-                    "phpunit --bootstrap ./tests/bootstrap.php --display-notices --display-deprecations --display-phpunit-deprecations ./tests"
+                    "phpunit"
                 ],
                 "compile-plurals": [
                     "php cli/compile.plurals.php --all"
@@ -119,7 +119,7 @@
                 "issues": "https://github.com/FreshRSS/FreshRSS/issues",
                 "source": "https://github.com/FreshRSS/FreshRSS/"
             },
-            "time": "2026-05-20T17:47:37+00:00"
+            "time": "2026-10-21T20:33:48+00:00"
         },
         {
             "name": "myclabs/deep-copy",

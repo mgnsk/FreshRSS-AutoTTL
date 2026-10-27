@@ -12,13 +12,16 @@ class StatItem
 
     public int $baseTTL;
 
-    public int $backoffTTL;
-
     public int $ttl;
 
     public int $avgTTL;
 
-    public function __construct(array $feed, int $baseTTL, int $maxTTL, int $cronIntervalEstimate = 0, ?ErrorGroupInfo $group = null)
+    /*
+     * See RetryAfter::forFeed(); 0 when FreshRSS has no active pause for this feed.
+     */
+    public int $retryAfter;
+
+    public function __construct(array $feed, int $baseTTL)
     {
         $this->id = (int) $feed['id'];
         $this->name = html_entity_decode($feed['name']);
@@ -26,8 +29,20 @@ class StatItem
         $this->attempt = FeedAttempt::fromTimestamps((int) $feed['lastUpdate'], $this->lastError);
 
         $this->baseTTL = $baseTTL;
-        $this->backoffTTL = BackoffCalculator::calcBackoffTTL($baseTTL, $this->attempt, $maxTTL, $cronIntervalEstimate, $group);
         $this->ttl = (int) $feed['ttl'];
         $this->avgTTL = (int) $feed['avgTTL'];
+        $this->retryAfter = self::calcRetryAfter($feed);
+    }
+
+    private static function calcRetryAfter(array $feed): int
+    {
+        if (!isset($feed['url']) || $feed['url'] === '') {
+            return 0;
+        }
+
+        $freshRSSFeed = new FreshRSS_Feed((string) $feed['url'], false);
+        $freshRSSFeed->_attributes((string) ($feed['attributes'] ?? ''));
+
+        return RetryAfter::forFeed($freshRSSFeed);
     }
 }
