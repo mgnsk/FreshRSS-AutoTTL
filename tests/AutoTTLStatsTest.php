@@ -198,6 +198,29 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame(4600, $adjustedTTL);
     }
 
+    public function test_calc_adjusted_ttl_dead_feed_jumps_to_max_ttl(): void
+    {
+        $defaultTTL = 3600;
+        $maxTTL = 86400;
+        $lastUpdate = 1000;
+
+        $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
+
+        // Not erroring: the average applies.
+        $this->assertSame(7200, $stats->calcAdjustedTTL(7200, $lastUpdate, $lastUpdate));
+
+        // Failing for up to maxTTL: still the average, so a temporarily broken
+        // feed recovers on its normal cadence.
+        $this->assertSame(7200, $stats->calcAdjustedTTL(7200, $lastUpdate + $maxTTL, $lastUpdate));
+
+        // Failing for longer than maxTTL: treated as dead, checked once per maxTTL.
+        $this->assertSame($maxTTL, $stats->calcAdjustedTTL(7200, $lastUpdate + $maxTTL + 1, $lastUpdate));
+
+        // Never successfully updated: no anchor to measure failure time from,
+        // so the average applies as before.
+        $this->assertSame(7200, $stats->calcAdjustedTTL(7200, $lastUpdate + $maxTTL + 1, 0));
+    }
+
     public function test_avg_ttl_zero(): void
     {
         $defaultTTL = 3600;

@@ -37,7 +37,8 @@ zero right as your cron actually runs the feed, instead of sitting on "pending" 
 # Erroring and rate-limited feeds
 
 A feed whose last fetch failed is retried on its normal adjusted TTL, counted from the failed attempt. AutoTTL adds
-no back-off of its own, so a feed recovers soon after its upstream is fixed.
+no back-off of its own, so a feed recovers soon after its upstream is fixed. The exception is a feed that has kept
+failing for longer than max TTL since its last successful update: it is treated as dead and checked once per max TTL.
 
 Rate limiting is left to FreshRSS itself: on an HTTP `429 Too Many Requests` or `503 Service Unavailable` response it
 pauses fetching until the `Retry-After` time (or `limits.retry_after_default`, 10 minutes by default, when the header is

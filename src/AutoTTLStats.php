@@ -11,8 +11,16 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->config = $config;
     }
 
-    public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0): int
+    public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0, int $lastUpdate = 0): int
     {
+        // A feed that has kept failing for longer than maxTTL since its last
+        // successful update is likely dead: check it no more than once per
+        // maxTTL instead of waiting for its entries to age out of the stats
+        // window. lastAttempt only exceeds lastUpdate while the feed is erroring.
+        if ($lastUpdate > 0 && $lastAttempt - $lastUpdate > $this->config->maxTTL) {
+            $avgTTL = 0;
+        }
+
         if ($this->config->defaultTTL > $this->config->maxTTL) {
             $result = $this->config->defaultTTL;
         } elseif ($avgTTL <= 0 || $avgTTL > $this->config->maxTTL) {
@@ -104,14 +112,14 @@ SQL;
         if ($stm !== false) {
             $res = $stm->fetch(PDO::FETCH_NAMED);
             if ($res !== false) {
-                return $this->calcAdjustedTTL((int) $res['avgTTL'], $lastAttempt);
+                return $this->calcAdjustedTTL((int) $res['avgTTL'], $lastAttempt, $lastUpdate);
             }
         }
 
         $info = $stm === false ? $this->pdo->errorInfo() : $stm->errorInfo();
         Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($info));
 
-        return $this->calcAdjustedTTL(0, $lastAttempt);
+        return $this->calcAdjustedTTL(0, $lastAttempt, $lastUpdate);
     }
 
     public function getFeedStats(bool $usesAutoTTL): array
@@ -154,7 +162,7 @@ SQL;
             $list = [];
             foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $feed) {
                 $attempt = FeedAttempt::fromTimestamps((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
-                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $attempt->lastAttempt);
+                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $attempt->lastAttempt, $attempt->lastUpdate);
 
                 $list[] = new StatItem($feed, $baseTTL);
             }
