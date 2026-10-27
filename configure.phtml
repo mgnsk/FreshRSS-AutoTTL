@@ -112,7 +112,7 @@
 						<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 					</td>
 					<td>
-						<?= $this->getStats()->humanIntervalFromSeconds($feed->baseTTL) ?>
+						<?= $this->getStats()->formatAdjustedTTL($feed) ?>
 					</td>
 					<td>
 						<?= $this->getStats()->formatLastAttempt($feed, $now) ?>

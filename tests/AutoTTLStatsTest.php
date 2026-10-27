@@ -221,6 +221,43 @@ final class AutoTTLStatsTest extends TestCase
         $this->assertSame(7200, $stats->calcAdjustedTTL(7200, $lastUpdate + $maxTTL + 1, 0));
     }
 
+    public function test_stats_page_explains_dead_feed_max_ttl(): void
+    {
+        $maxTTL = 86400;
+        $now = 1_000_000;
+        $stats = new AutoTTLStats(new AutoTTLConfig(3600, $maxTTL, 100));
+
+        $makeItem = function (int $lastUpdate, int $error) use ($stats): StatItem {
+            $attempt = FeedAttempt::fromTimestamps($lastUpdate, $error);
+            $baseTTL = $stats->calcAdjustedTTL(7200, $attempt->lastAttempt, $attempt->lastUpdate);
+
+            return new StatItem([
+                'id' => 1,
+                'name' => 'Feed',
+                'lastUpdate' => $lastUpdate,
+                'error' => $error,
+                'ttl' => 0,
+                'avgTTL' => 7200,
+            ], $baseTTL);
+        };
+
+        // Failing for under maxTTL: normal TTL, no explanation needed.
+        $recent = $makeItem($now - 7200, $now - 3600);
+        $this->assertSame('2 hours', $stats->formatAdjustedTTL($recent));
+        $this->assertSame('error 1 hour ago, last success 2 hours ago', $stats->formatLastAttempt($recent, $now));
+
+        // Failing for over maxTTL: the max TTL is called out with its reason.
+        $dead = $makeItem($now - 3 * 86400, $now - 3600);
+        $this->assertSame('1 day (max TTL: failing for over 1 day)', $stats->formatAdjustedTTL($dead));
+        $this->assertSame('error 1 hour ago, last success 3 days ago', $stats->formatLastAttempt($dead, $now));
+
+        // Never succeeded.
+        $this->assertSame('error 1 hour ago, never succeeded', $stats->formatLastAttempt($makeItem(0, $now - 3600), $now));
+
+        // Healthy feed is unchanged.
+        $this->assertSame('1 hour ago', $stats->formatLastAttempt($makeItem($now - 3600, 0), $now));
+    }
+
     public function test_avg_ttl_zero(): void
     {
         $defaultTTL = 3600;

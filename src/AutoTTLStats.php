@@ -13,11 +13,7 @@ class AutoTTLStats extends Minz_ModelPdo
 
     public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0, int $lastUpdate = 0): int
     {
-        // A feed that has kept failing for longer than maxTTL since its last
-        // successful update is likely dead: check it no more than once per
-        // maxTTL instead of waiting for its entries to age out of the stats
-        // window. lastAttempt only exceeds lastUpdate while the feed is erroring.
-        if ($lastUpdate > 0 && $lastAttempt - $lastUpdate > $this->config->maxTTL) {
+        if ($this->isLikelyDead($lastAttempt, $lastUpdate)) {
             $avgTTL = 0;
         }
 
@@ -37,6 +33,17 @@ class AutoTTLStats extends Minz_ModelPdo
         $result = max($result, $this->config->minTTL);
 
         return $this->snapToNextSweep($lastAttempt, $result);
+    }
+
+    /*
+     * A feed that has kept failing for longer than maxTTL since its last
+     * successful update is likely dead: calcAdjustedTTL() checks it no more
+     * than once per maxTTL instead of waiting for its entries to age out of the
+     * stats window. lastAttempt only exceeds lastUpdate while the feed is erroring.
+     */
+    public function isLikelyDead(int $lastAttempt, int $lastUpdate): bool
+    {
+        return $lastUpdate > 0 && $lastAttempt - $lastUpdate > $this->config->maxTTL;
     }
 
     /*
@@ -175,12 +182,30 @@ SQL;
         return [];
     }
 
+    public function formatAdjustedTTL(StatItem $feed): string
+    {
+        $result = self::humanIntervalFromSeconds($feed->baseTTL);
+
+        if ($this->isLikelyDead($feed->attempt->lastAttempt, $feed->attempt->lastUpdate)) {
+            $result .= ' (max TTL: failing for over ' . self::humanIntervalFromSeconds($this->config->maxTTL) . ')';
+        }
+
+        return $result;
+    }
+
     public function formatLastAttempt(StatItem $feed, int $now): string
     {
         if ($feed->attempt->isErroring) {
-            return $feed->lastError > FeedAttempt::LEGACY_ERROR_SENTINEL
+            $result = $feed->lastError > FeedAttempt::LEGACY_ERROR_SENTINEL
                 ? 'error ' . self::humanIntervalFromSeconds($now - $feed->lastError) . ' ago'
                 : 'error (time unknown)';
+
+            // How long the feed has been failing is what drives its TTL - see isLikelyDead().
+            $result .= $feed->attempt->lastUpdate > 0
+                ? ', last success ' . self::humanIntervalFromSeconds($now - $feed->attempt->lastUpdate) . ' ago'
+                : ', never succeeded';
+
+            return $result;
         }
 
         return $feed->attempt->lastUpdate > 0
