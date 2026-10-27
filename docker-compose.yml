@@ -44,6 +44,8 @@ services:
       CRON_MIN: '*'
       TRUSTED_PROXY: 172.16.0.1/12 192.168.0.1/16
       FRESHRSS_ENV: development
+      # Allow fetching test feeds from wiremock past FreshRSS's SSRF protection
+      INTERNAL_HOST_ALLOWLIST: wiremock:8080
     ports:
       - "8080:80"
     healthcheck:
