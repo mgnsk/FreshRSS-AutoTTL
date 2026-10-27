@@ -11,8 +11,16 @@ class AutoTTLStats extends Minz_ModelPdo
         $this->config = $config;
     }
 
-    public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0): int
+    public function calcAdjustedTTL(int $avgTTL, int $lastAttempt = 0, int $lastUpdate = 0): int
     {
+        // A feed that has kept failing for longer than maxTTL since its last
+        // successful update is likely dead: check it no more than once per
+        // maxTTL instead of waiting for its entries to age out of the stats
+        // window. lastAttempt only exceeds lastUpdate while the feed is erroring.
+        if ($lastUpdate > 0 && $lastAttempt - $lastUpdate > $this->config->maxTTL) {
+            $avgTTL = 0;
+        }
+
         if ($this->config->defaultTTL > $this->config->maxTTL) {
             $result = $this->config->defaultTTL;
         } elseif ($avgTTL <= 0 || $avgTTL > $this->config->maxTTL) {
@@ -85,7 +93,13 @@ class AutoTTLStats extends Minz_ModelPdo
         return $this->config->cronLastHookTs + $sweepsAhead * $this->config->cronIntervalEstimate;
     }
 
-    public function getAdjustedTTL(int $feedID, int $lastUpdate): int
+    /*
+     * The average is anchored at the last successful update, not the last
+     * attempt: failed attempts bring in no entries, so counting the time they
+     * add would stretch the average for as long as a feed keeps failing. The
+     * resulting TTL is still counted from (and snapped against) the last attempt.
+     */
+    public function getAdjustedTTL(int $feedID, int $lastUpdate, int $lastAttempt): int
     {
         $sql = <<<SQL
 SELECT
@@ -98,14 +112,14 @@ SQL;
         if ($stm !== false) {
             $res = $stm->fetch(PDO::FETCH_NAMED);
             if ($res !== false) {
-                return $this->calcAdjustedTTL((int) $res['avgTTL'], $lastUpdate);
+                return $this->calcAdjustedTTL((int) $res['avgTTL'], $lastAttempt, $lastUpdate);
             }
         }
 
         $info = $stm === false ? $this->pdo->errorInfo() : $stm->errorInfo();
         Minz_Log::error('AutoTTL SQL error ' . __METHOD__ . ' ' . json_encode($info));
 
-        return $this->calcAdjustedTTL(0, $lastUpdate);
+        return $this->calcAdjustedTTL(0, $lastAttempt, $lastUpdate);
     }
 
     public function getFeedStats(bool $usesAutoTTL): array
@@ -117,11 +131,9 @@ SQL;
             $where = 'feed.ttl != 0';
         }
 
-        // Mirrors FeedAttempt::calcLastAttempt(): the legacy error sentinel (1) is
-        // not a real timestamp, so it's excluded from the "last attempt" anchor used below.
-        // This must match the anchor the throttle engine uses (feedBeforeActualizeHook),
-        // otherwise the displayed adjusted TTL diverges from the one actually applied.
-        $lastAttempt = "(CASE WHEN feed.error > 1 AND feed.error > feed.`lastUpdate` THEN feed.error ELSE feed.`lastUpdate` END)";
+        // Anchored at the last successful update, same as getAdjustedTTL(), so the
+        // displayed adjusted TTL matches the one feedBeforeActualizeHook() applies.
+        $lastUpdate = 'feed.`lastUpdate`';
 
         $sql = <<<SQL
 SELECT
@@ -132,16 +144,16 @@ SELECT
     feed.`lastUpdate`,
     feed.error,
     feed.ttl,
-    COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
+    COALESCE(({$lastUpdate} - MIN(stats.date)) / COUNT(1), 0) AS `avgTTL`
 FROM `_feed` AS feed
 LEFT JOIN (
     SELECT id_feed, date
     FROM `_entry`
     WHERE date > {$this->getStatsCutoff()}
-) AS stats ON feed.id = stats.id_feed AND stats.date <= {$lastAttempt}
+) AS stats ON feed.id = stats.id_feed AND stats.date <= {$lastUpdate}
 WHERE {$where}
 GROUP BY feed.id
-ORDER BY COALESCE(({$lastAttempt} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
+ORDER BY COALESCE(({$lastUpdate} - MIN(stats.date)) / COUNT(1), 0) = 0, `avgTTL` ASC
 LIMIT {$this->config->statsCount}
 SQL;
 
@@ -150,7 +162,7 @@ SQL;
             $list = [];
             foreach ($stm->fetchAll(PDO::FETCH_NAMED) as $feed) {
                 $attempt = FeedAttempt::fromTimestamps((int) $feed['lastUpdate'], (int) ($feed['error'] ?? 0));
-                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $attempt->lastAttempt);
+                $baseTTL = $this->calcAdjustedTTL((int) $feed['avgTTL'], $attempt->lastAttempt, $attempt->lastUpdate);
 
                 $list[] = new StatItem($feed, $baseTTL);
             }

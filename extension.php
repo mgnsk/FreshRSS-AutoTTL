@@ -145,7 +145,7 @@ class AutoTTLExtension extends Minz_Extension
         }
 
         $timeSinceLastAttempt = time() - $lastAttempt;
-        $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
+        $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $feed->lastUpdate(), $lastAttempt);
 
         if ($timeSinceLastAttempt < $ttl) {
             Minz_Log::debug(
