@@ -17,6 +17,6 @@
   "require-dev": {
     "phpunit/phpunit": "^13",
     "phpstan/phpstan": "^2.2",
-    "freshrss.org/freshrss": "1.29.1"
+    "freshrss.org/freshrss": "1.30.4"
   }
 }

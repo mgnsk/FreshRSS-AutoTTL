@@ -112,14 +112,13 @@
 						<?= ($feed->avgTTL > 0) ? $this->getStats()->humanIntervalFromSeconds($feed->avgTTL) : 'not enough data' ?>
 					</td>
 					<td>
-						<?php $ttl = $feed->attempt->isErroring ? $feed->backoffTTL : $feed->baseTTL; ?>
-						<?= $this->getStats()->humanIntervalFromSeconds($ttl) ?><?= ($feed->attempt->isErroring && $feed->backoffTTL > $feed->baseTTL) ? ' (error backoff)' : '' ?>
+						<?= $this->getStats()->humanIntervalFromSeconds($feed->baseTTL) ?>
 					</td>
 					<td>
 						<?= $this->getStats()->formatLastAttempt($feed, $now) ?>
 					</td>
 					<td>
-						<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $feed->backoffTTL, $now) ?>
+						<?= $this->getStats()->formatTimeUntilNextUpdate($feed, $feed->baseTTL, $now) ?>
 					</td>
 				</tr>
 				<?php } ?>

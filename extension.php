@@ -1,9 +1,8 @@
 <?php
 
-require_once __DIR__.'/src/ErrorGroupInfo.php';
 require_once __DIR__.'/src/AutoTTLConfig.php';
 require_once __DIR__.'/src/FeedAttempt.php';
-require_once __DIR__.'/src/BackoffCalculator.php';
+require_once __DIR__.'/src/RetryAfter.php';
 require_once __DIR__.'/src/StatItem.php';
 require_once __DIR__.'/src/CronEstimate.php';
 require_once __DIR__.'/src/CronIntervalEstimator.php';
@@ -106,20 +105,6 @@ class AutoTTLExtension extends Minz_Extension
         $this->cronIntervalEstimate = $result->estimate;
     }
 
-    public function getBackoffTTL(FreshRSS_Feed $feed, int $baseTTL): int
-    {
-        $attempt = FeedAttempt::fromTimestamps($feed->lastUpdate(), $feed->lastError());
-
-        // Only touches the host-group query when it can matter: an erroring
-        // feed. A healthy sweep never pays for it.
-        $group = new ErrorGroupInfo();
-        if ($attempt->isErroring) {
-            $group = $this->getStats()->getGroupInfoForFeed($feed->id());
-        }
-
-        return BackoffCalculator::calcBackoffTTL($baseTTL, $attempt, $this->maxTTL, $this->cronIntervalEstimate, $group);
-    }
-
     public function feedBeforeActualizeHook(FreshRSS_Feed $feed)
     {
         // A direct request for one feed is a user-initiated refresh.
@@ -161,24 +146,31 @@ class AutoTTLExtension extends Minz_Extension
 
         $timeSinceLastAttempt = time() - $lastAttempt;
         $ttl = $this->getStats()->getAdjustedTTL($feed->id(), $lastAttempt);
-        $backoffTTL = $this->getBackoffTTL($feed, $ttl);
-        // $ttl already lands on a predicted cron sweep, and so does $backoffTTL
-        // when the cron interval is known - but the bootstrap backoff
-        // formula (interval not yet learned) doesn't; re-snap so the gate below
-        // always resolves at an actual sweep instead of sometime in the gap
-        // before the next one.
-        $effectiveTTL = $this->getStats()->snapToNextSweep($lastAttempt, $backoffTTL);
 
-        if ($timeSinceLastAttempt < $effectiveTTL) {
+        if ($timeSinceLastAttempt < $ttl) {
             Minz_Log::debug(
                 sprintf(
-                    'AutoTTL: skip feed %d (%s, last attempt %s): effective TTL (%ds, from %ds TTL + %ds backoff) not exceeded yet',
+                    'AutoTTL: skip feed %d (%s, last attempt %s): adjusted TTL (%ds) not exceeded yet',
                     $feed->id(),
                     $feed->name(),
                     date('r', $lastAttempt),
-                    $effectiveTTL,
                     $ttl,
-                    $backoffTTL - $ttl,
+                )
+            );
+
+            return null;
+        }
+
+        // Only checked once the feed is due: until then the TTL gate above
+        // already skips it, and FreshRSS's pause may have lapsed by then anyway.
+        $retryAfter = RetryAfter::forFeed($feed);
+        if ($retryAfter > 0) {
+            Minz_Log::debug(
+                sprintf(
+                    'AutoTTL: skip feed %d (%s): rate limited, FreshRSS will first retry after %s',
+                    $feed->id(),
+                    $feed->name(),
+                    date('r', $retryAfter),
                 )
             );
 
@@ -187,11 +179,11 @@ class AutoTTLExtension extends Minz_Extension
 
         Minz_Log::debug(
             sprintf(
-                'AutoTTL: updating feed %d (%s, last attempt %s, backoff TTL %ds)',
+                'AutoTTL: updating feed %d (%s, last attempt %s, adjusted TTL %ds)',
                 $feed->id(),
                 $feed->name(),
                 date('r', $lastAttempt),
-                $backoffTTL,
+                $ttl,
             )
         );
 
