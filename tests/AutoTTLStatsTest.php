@@ -261,7 +261,7 @@ final class AutoTTLStatsTest extends TestCase
             $now = time();
 
             $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now);
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now, $now);
 
             // (now - -16h) / 3 = 57600 seconds / 3 = 19200 seconds
             $this->assertSame(19200, $adjustedTTL);
@@ -289,17 +289,17 @@ final class AutoTTLStatsTest extends TestCase
 
             // Two updates in a row when we checked implies frequent updates.
             // 2 seconds / 2 entries = 1 second < $defaultTTL
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 172798);
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 172798, $now - 172798);
             $this->assertSame($defaultTTL, $adjustedTTL);
 
             // Two updates in a row, but hours ago, implies moderate updates.
             // (-115200 - -172800) / 2 = 57600 seconds / 2 = 28800 seconds
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 115200);
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now - 115200, $now - 115200);
             $this->assertSame(28800, $adjustedTTL);
 
             // Two updates in a row, but days ago, implies slow updates.
             // 2 days > 1 day $maxTTL
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now);
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), $now, $now);
             $this->assertSame($maxTTL, $adjustedTTL);
 
         } finally {
@@ -319,7 +319,7 @@ final class AutoTTLStatsTest extends TestCase
             $feed = FreshRSS_feed_Controller::addFeed('http://wiremock:8080/future_dated.xml');
 
             $stats = new AutoTTLStats(new AutoTTLConfig($defaultTTL, $maxTTL, 100));
-            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), time());
+            $adjustedTTL = $stats->getAdjustedTTL($feed->id(), time(), time());
 
             // future_dated.xml's entries are dated via wiremock's "now" templating
             // helper, offset +2/+3 years, so they're always after lastUpdate (~now)
@@ -381,6 +381,9 @@ final class AutoTTLStatsTest extends TestCase
                     $this->assertSame(19200, $item->avgTTL);
                 } elseif ($item->id === $erroredFeed->id()) {
                     $this->assertTrue($item->attempt->isErroring);
+                    // Anchored at the last successful update, not the more recent
+                    // error: (-86400 - -172800) / 2 = 43200 seconds.
+                    $this->assertSame(43200, $item->avgTTL);
                 } elseif ($item->id === $futureDatedFeed->id()) {
                     // future_dated.xml's entries are dated via wiremock's "now"
                     // templating helper, offset +2/+3 years, so they're always
@@ -584,15 +587,17 @@ final class AutoTTLStatsTest extends TestCase
             $ext->cronLastHookTs = 0;
             $ext->cronIntervalEstimate = 0;
 
-            // Both feeds last succeeded a day ago and have been erroring since.
-            // The last error was 30000s ago: only the -16h entry is at or before
-            // it, so the adjusted TTL is (57600 - 30000) / 1 = 27600s, which has
-            // already passed.
+            // Both feeds last succeeded 40000s ago and have been erroring since,
+            // most recently 20000s ago. The average is anchored at the last
+            // successful update: only the -16h entry is at or before it, so the
+            // adjusted TTL is (57600 - 40000) / 1 = 17600s, which has passed
+            // since the last error. Anchoring at the last error instead would
+            // stretch it to (57600 - 20000) / 1 = 37600s and keep the feed waiting.
             $now = time();
             $feedDAO = FreshRSS_Factory::createFeedDao();
             foreach ([$feed, $sibling] as $f) {
-                $feedDAO->updateLastUpdate($f->id(), $now - 86400);
-                $feedDAO->updateLastError($f->id(), $now - 30000);
+                $feedDAO->updateLastUpdate($f->id(), $now - 40000);
+                $feedDAO->updateLastError($f->id(), $now - 20000);
             }
             $feed = $feedDAO->searchById($feed->id());
 
